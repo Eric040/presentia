@@ -1,0 +1,74 @@
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Reference data (production and development): leave types,
+ * default parameters from specifications, fixed-date holidays.
+ * Moving holidays (Easter, Ascension, Pentecost, Muslim holidays...)
+ * must be entered by the administrator each year (F6.10).
+ */
+class ReferenceDataSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $now = now();
+
+        foreach ([
+            ['Sortie', 'partial'],
+            ['Rendez-vous', 'partial'],
+            ['Journee complete', 'full_day'],
+            ['Mission externe', 'external_mission'],
+            ['Teletravail', 'remote_work'],
+        ] as [$label, $characteristic]) {
+            DB::table('leave_types')->updateOrInsert(
+                ['label' => $label],
+                ['characteristic' => $characteristic, 'active' => true, 'created_at' => $now, 'updated_at' => $now]
+            );
+        }
+
+        $settings = [
+            ['tolerance_retard_min', '10', 'schedules'],
+            ['seuil_absence_heures', '2', 'schedules'],
+            ['rayon_defaut_m', '100', 'pings'],
+            ['precision_max_m', '100', 'pings'],
+            ['pings_par_jour', '2', 'pings'],
+            ['ping_delai_min', '10', 'pings'],
+            ['rappel_delai_heures', '4', 'reminders'],
+            ['rappels_avant_escalade', '3', 'reminders'],
+            ['delai_prevenance_jours', '3', 'rest_days'],
+            ['inactivite_employe_min', '30', 'security'],
+            ['inactivite_admin_min', '15', 'security'],
+            ['fichier_max_mo', '10', 'messaging'],
+            ['assistant_redaction_actif', '1', 'messaging'],
+        ];
+        foreach ($settings as [$key, $value, $group]) {
+            DB::table('settings')->insertOrIgnore([
+                'key' => $key, 'value' => $value, 'group' => $group,
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+        }
+
+        // Fixed-date holidays (to be verified with the official calendar in force)
+        $fixed = [
+            '01-01' => "Jour de l'an",
+            '01-10' => 'Fete des religions endogenes',
+            '05-01' => 'Fete du travail',
+            '08-01' => "Fete de l'Independance",
+            '08-15' => 'Assomption',
+            '11-01' => 'Toussaint',
+            '12-25' => 'Noel',
+        ];
+        foreach ([2026, 2027, 2028] as $year) {
+            foreach ($fixed as $dayMonth => $label) {
+                DB::table('holidays')->insertOrIgnore([
+                    'date' => "$year-$dayMonth", 'label' => $label,
+                    'created_at' => $now, 'updated_at' => $now,
+                ]);
+            }
+        }
+    }
+}
