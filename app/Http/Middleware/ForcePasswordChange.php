@@ -24,7 +24,7 @@ use Symfony\Component\HttpFoundation\Response;
 class ForcePasswordChange
 {
     private const ROUTES_AUTORISEES = [
-        'user-password.edit',
+        'security.edit',
         'user-password.update',
         'logout',
     ];

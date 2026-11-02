@@ -3,6 +3,7 @@
 namespace App\Models\Concerns;
 
 use LogicException;
+use App\Enums\Role;
 
 /**
  * Le compte administrateur ne peut etre ni supprime, ni desactive, ni change de role.
@@ -14,14 +15,14 @@ trait ProtectAdministratorAccount
     public static function bootProtectAdministratorAccount(): void
     {
         static::deleting(function ($user) {
-            if ($user->role === 'administrateur') {
+            if ($user->role === Role::Administrator) {
                 throw new LogicException("Le compte administrateur ne peut pas etre supprime.");
             }
         });
 
         static::updating(function ($user) {
-            if ($user->getOriginal('role') === 'administrateur'
-                && ($user->role !== 'administrateur' || ! $user->actif)) {
+            if ($user->getOriginal('role') === Role::Administrator
+                && ($user->role !== Role::Administrator || ! $user->active)) {
                 throw new LogicException("Le compte administrateur ne peut pas etre desactive ni change de role.");
             }
         });

@@ -31,19 +31,19 @@ class ReferenceDataSeeder extends Seeder
         }
 
         $settings = [
-            ['tolerance_retard_min', '10', 'schedules'],
-            ['seuil_absence_heures', '2', 'schedules'],
-            ['rayon_defaut_m', '100', 'pings'],
-            ['precision_max_m', '100', 'pings'],
-            ['pings_par_jour', '2', 'pings'],
-            ['ping_delai_min', '10', 'pings'],
-            ['rappel_delai_heures', '4', 'reminders'],
-            ['rappels_avant_escalade', '3', 'reminders'],
-            ['delai_prevenance_jours', '3', 'rest_days'],
-            ['inactivite_employe_min', '30', 'security'],
-            ['inactivite_admin_min', '15', 'security'],
-            ['fichier_max_mo', '10', 'messaging'],
-            ['assistant_redaction_actif', '1', 'messaging'],
+            ['late_tolerance_min', '10', 'schedules'],
+            ['absence_threshold_hours', '2', 'schedules'],
+            ['default_radius_m', '100', 'pings'],
+            ['max_accuracy_m', '100', 'pings'],
+            ['pings_per_day', '2', 'pings'],
+            ['ping_timeout_min', '10', 'pings'],
+            ['reminder_delay_hours', '4', 'reminders'],
+            ['reminders_before_escalation', '3', 'reminders'],
+            ['notice_days', '3', 'rest_days'],
+            ['employee_idle_min', '30', 'security'],
+            ['admin_idle_min', '15', 'security'],
+            ['max_file_size_mb', '10', 'messaging'],
+            ['writing_assistant_enabled', '1', 'messaging'],
         ];
         foreach ($settings as [$key, $value, $group]) {
             DB::table('settings')->insertOrIgnore([

@@ -14,6 +14,7 @@ import type { Auth } from '@/types';
 /* @chisel-email-verification */
 import { send } from '@/routes/verification';
 /* @end-chisel-email-verification */
+import { useState } from 'react';
 
 type PageProps = {
     auth: Auth;
@@ -31,6 +32,22 @@ export default function Profile(
     /* @end-chisel-email-verification */
 ) {
     const { auth } = usePage<PageProps>().props;
+    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+    const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setPhotoPreview(URL.createObjectURL(file));
+        }
+    };
+
+    const getPhotoUrl = () => {
+        if (photoPreview) return photoPreview;
+        if (auth.user.profile_photo_path) {
+            return `/storage/${auth.user.profile_photo_path}`;
+        }
+        return null;
+    };
 
     return (
         <>
@@ -42,7 +59,7 @@ export default function Profile(
                 <Heading
                     variant="small"
                     title="Profile"
-                    description="Update your name and email address"
+                    description="Update your name, email address, and profile photo"
                 />
 
                 <Form
@@ -54,6 +71,47 @@ export default function Profile(
                 >
                     {({ processing, errors }) => (
                         <>
+                            <div className="flex items-center gap-6">
+                                <div className="relative h-20 w-20 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+                                    {getPhotoUrl() ? (
+                                        <img
+                                            src={getPhotoUrl()}
+                                            alt="Profile photo"
+                                            className="h-full w-full object-cover"
+                                        />
+                                    ) : (
+                                        <div className="flex h-full w-full items-center justify-center text-2xl font-bold text-neutral-400">
+                                            {auth.user.name.charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                </div>
+                                <div>
+                                    <Label
+                                        htmlFor="profile_photo"
+                                        className="cursor-pointer text-sm font-medium text-foreground hover:underline"
+                                    >
+                                        Choose a new photo
+                                    </Label>
+                                    <Input
+                                        id="profile_photo"
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/jpg,image/webp"
+                                        className="hidden"
+                                        name="profile_photo"
+                                        onChange={handlePhotoChange}
+                                    />
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        JPEG, PNG, or WebP. Max 2MB.
+                                    </p>
+                                    {errors.profile_photo && (
+                                        <InputError
+                                            className="mt-2"
+                                            message={errors.profile_photo}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+
                             <div className="grid gap-2">
                                 <Label htmlFor="name">Name</Label>
 

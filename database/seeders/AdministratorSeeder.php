@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use App\Enums\Role;
 
 /**
  * Creates the administrator account (the director) from .env:
@@ -37,7 +38,7 @@ class AdministratorSeeder extends Seeder
         $user->forceFill([
             'name' => $name,
             'identifier' => $identifier,
-            'role' => 'administrateur',
+            'role' => Role::Administrator,
             'rest_quota' => 0,
             'active' => true,
             'email_verified_at' => $user->email_verified_at ?? now(),

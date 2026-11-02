@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use App\Enums\Role;
 
 /**
  * Test data for development only (local environment).
@@ -21,7 +22,7 @@ class DemoSeeder extends Seeder
         }
 
         $now = now();
-        $admin = User::where('role', 'administrateur')->first();
+        $admin = User::where('role', Role::Administrator)->first();
 
         DB::table('services')->insertOrIgnore([
             ['name' => 'Direction', 'created_at' => $now, 'updated_at' => $now],
@@ -36,7 +37,7 @@ class DemoSeeder extends Seeder
         $marketing = DB::table('services')->where('name', 'Marketing')->value('id');
         $comptabilite = DB::table('services')->where('name', 'Comptabilite')->value('id');
 
-        $creer = function (string $name, string $identifier, string $role, int $service, ?int $managerId, int $quota) {
+        $creer = function (string $name, string $identifier, Role $role, int $service, ?int $managerId, int $quota) {
             $u = User::firstOrNew(['email' => "$identifier@exemple.test"]);
             $u->forceFill([
                 'name' => $name, 'identifier' => $identifier, 'role' => $role,
@@ -55,14 +56,14 @@ class DemoSeeder extends Seeder
             $admin->forceFill(['service_id' => $direction])->save();
         }
 
-        $rh = $creer('Secretaire Test', 'secretaire', 'rh', $rhService, $admin?->id, 2);
-        $respDev = $creer('Responsable Dev Test', 'resp_dev', 'responsable', $developpement, $admin?->id, 2);
-        $creer('Employe Un', 'employe1', 'employe', $developpement, $respDev->id, 2);
-        $creer('Employe Deux', 'employe2', 'employe', $developpement, $respDev->id, 0);
-        $respMkt = $creer('Responsable Marketing Test', 'resp_mkt', 'responsable', $marketing, $admin?->id, 2);
-        $creer('Community Manager Test', 'community_manager', 'employe', $marketing, $respMkt->id, 2);
-        $creer('Graphiste Test', 'graphiste', 'employe', $marketing, $respMkt->id, 2);
-        $creer('Comptable Test', 'comptable', 'comptable', $comptabilite, $admin?->id, 2);
+        $rh = $creer('Secretaire Test', 'secretaire', Role::Hr, $rhService, $admin?->id, 2);
+        $respDev = $creer('Responsable Dev Test', 'resp_dev', Role::Manager, $developpement, $admin?->id, 2);
+        $creer('Employe Un', 'dev_front', Role::Employee, $developpement, $respDev->id, 2);
+        $creer('Employe Deux', 'dev_back', Role::Employee, $developpement, $respDev->id, 0);
+        $respMkt = $creer('Responsable Marketing Test', 'resp_mkt', Role::Manager, $marketing, $admin?->id, 2);
+        $creer('Community Manager Test', 'community_manager', Role::Employee, $marketing, $respMkt->id, 2);
+        $creer('Graphiste Test', 'graphiste', Role::Employee, $marketing, $respMkt->id, 2);
+        $creer('Comptable Test', 'comptable', Role::Accountant, $comptabilite, $admin?->id, 2);
 
         DB::table('services')->where('id', $direction)->update(['manager_id' => $admin?->id]);
         DB::table('services')->where('id', $rhService)->update(['manager_id' => $rh->id]);
