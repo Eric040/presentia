@@ -33,4 +33,4 @@ class PresencePing extends Model
     {
         return $query->whereNull('responded_at')->where('expires_at', '>', now());
     }
-}   
+}

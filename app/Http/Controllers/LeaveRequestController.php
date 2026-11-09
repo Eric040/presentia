@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\LeaveStatus;
+use App\Enums\Role;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
-use App\Models\User;
-use App\Enums\LeaveStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\Rule;
+use Inertia\Inertia;
 
 class LeaveRequestController extends Controller
 {
@@ -17,12 +17,12 @@ class LeaveRequestController extends Controller
         $user = Auth::user();
         $query = LeaveRequest::with(['user', 'type', 'approver']);
 
-        if (!$user->can('viewAny', LeaveRequest::class)) {
+        if (! $user->can('viewAny', LeaveRequest::class)) {
             $query->where('user_id', $user->id);
-        } elseif ($user->hasRole(\App\Enums\Role::Manager)) {
+        } elseif ($user->hasRole(Role::Manager)) {
             $query->whereHas('user', function ($q) use ($user) {
                 $q->where('service_id', $user->service_id)
-                  ->orWhere('manager_id', $user->id);
+                    ->orWhere('manager_id', $user->id);
             });
         }
 
@@ -34,12 +34,25 @@ class LeaveRequestController extends Controller
             $query->where('type_id', $request->type_id);
         }
 
-        return $query->orderBy('created_at', 'desc')->paginate(20);
+        $leaveRequests = $query->orderBy('created_at', 'desc')->get();
+
+        $stats = [
+            'total' => $leaveRequests->count(),
+            'pending' => $leaveRequests->where('status', LeaveStatus::Pending)->count(),
+            'approved' => $leaveRequests->where('status', LeaveStatus::Approved)->count(),
+            'rejected' => $leaveRequests->where('status', LeaveStatus::Rejected)->count(),
+        ];
+
+        return Inertia::render('leave-requests/index', [
+            'leaveRequests' => $leaveRequests,
+            'stats' => $stats,
+        ]);
     }
 
     public function show(LeaveRequest $leaveRequest)
     {
         $this->authorize('view', $leaveRequest);
+
         return $leaveRequest->load(['user', 'type', 'approver']);
     }
 
@@ -100,6 +113,7 @@ class LeaveRequestController extends Controller
     {
         $this->authorize('delete', $leaveRequest);
         $leaveRequest->delete();
+
         return response()->noContent();
     }
 
@@ -107,7 +121,7 @@ class LeaveRequestController extends Controller
     {
         $this->authorize('approve', $leaveRequest);
 
-        if (!$leaveRequest->status->isPending()) {
+        if (! $leaveRequest->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être approuvées'], 400);
         }
 
@@ -129,7 +143,7 @@ class LeaveRequestController extends Controller
             'comment' => 'required|string|max:1000',
         ]);
 
-        if (!$leaveRequest->status->isPending()) {
+        if (! $leaveRequest->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être refusées'], 400);
         }
 
@@ -147,11 +161,12 @@ class LeaveRequestController extends Controller
     {
         $this->authorize('update', $leaveRequest);
 
-        if (!$leaveRequest->status->isPending()) {
+        if (! $leaveRequest->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être annulées'], 400);
         }
 
         $leaveRequest->update(['status' => LeaveStatus::Cancelled]);
+
         return response()->json($leaveRequest);
     }
 

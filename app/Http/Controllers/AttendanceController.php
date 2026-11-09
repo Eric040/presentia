@@ -2,18 +2,22 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AttendanceStatus;
+use App\Enums\RestDayStatus;
+use App\Enums\Role;
+use App\Enums\TimeLogFlag;
+use App\Enums\TimeLogType;
 use App\Models\AttendanceSession;
-use App\Models\TimeLog;
-use App\Models\WorkZone;
+use App\Models\Holiday;
+use App\Models\LeaveRequest;
 use App\Models\RestDay;
 use App\Models\Schedule;
-use App\Models\Holiday;
-use App\Enums\AttendanceStatus;
-use App\Enums\TimeLogType;
-use App\Enums\TimeLogFlag;
+use App\Models\TimeLog;
+use App\Models\WorkZone;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
 
 class AttendanceController extends Controller
 {
@@ -22,12 +26,12 @@ class AttendanceController extends Controller
         $user = Auth::user();
         $query = AttendanceSession::with(['user', 'timeLogs']);
 
-        if (!$user->can('viewAny', AttendanceSession::class)) {
+        if (! $user->can('viewAny', AttendanceSession::class)) {
             $query->where('user_id', $user->id);
-        } elseif ($user->hasRole(\App\Enums\Role::Manager)) {
+        } elseif ($user->hasRole(Role::Manager)) {
             $query->whereHas('user', function ($q) use ($user) {
                 $q->where('service_id', $user->service_id)
-                  ->orWhere('manager_id', $user->id);
+                    ->orWhere('manager_id', $user->id);
             });
         }
 
@@ -43,12 +47,27 @@ class AttendanceController extends Controller
             $query->where('status', $request->status);
         }
 
-        return $query->orderBy('date', 'desc')->paginate(20);
+        $sessions = $query->orderBy('date', 'desc')->get();
+
+        $stats = [
+            'active' => $sessions->where('status', AttendanceStatus::InProgress)->count(),
+            'completed' => $sessions->where('status', AttendanceStatus::Complete)->count(),
+            'on_break' => $sessions->filter(function ($session) {
+                $lastLog = $session->timeLogs->last();
+                return $lastLog && $lastLog->type === TimeLogType::BreakStart;
+            })->count(),
+        ];
+
+        return Inertia::render('attendance/index', [
+            'sessions' => $sessions,
+            'stats' => $stats,
+        ]);
     }
 
     public function show(AttendanceSession $session)
     {
         $this->authorize('view', $session);
+
         return $session->load(['user', 'timeLogs']);
     }
 
@@ -62,7 +81,7 @@ class AttendanceController extends Controller
             ['status' => AttendanceStatus::InProgress]
         );
 
-        if ($session->arrival && !$session->departure) {
+        if ($session->arrival && ! $session->departure) {
             return response()->json(['message' => 'Vous avez déjà pointé votre arrivée aujourd\'hui'], 400);
         }
 
@@ -110,7 +129,7 @@ class AttendanceController extends Controller
 
         $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
 
-        if (!$session || !$session->arrival) {
+        if (! $session || ! $session->arrival) {
             return response()->json(['message' => 'Aucune session en cours pour aujourd\'hui'], 400);
         }
 
@@ -156,7 +175,7 @@ class AttendanceController extends Controller
 
         $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
 
-        if (!$session || !$session->arrival) {
+        if (! $session || ! $session->arrival) {
             return response()->json(['message' => 'Aucune session en cours'], 400);
         }
 
@@ -195,12 +214,12 @@ class AttendanceController extends Controller
 
         $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
 
-        if (!$session || !$session->arrival) {
+        if (! $session || ! $session->arrival) {
             return response()->json(['message' => 'Aucune session en cours'], 400);
         }
 
         $lastLog = $session->timeLogs()->latest()->first();
-        if (!$lastLog || $lastLog->type !== TimeLogType::BreakStart) {
+        if (! $lastLog || $lastLog->type !== TimeLogType::BreakStart) {
             return response()->json(['message' => 'Aucune pause en cours'], 400);
         }
 
@@ -234,7 +253,7 @@ class AttendanceController extends Controller
 
     private function isInZone(float $lat, float $lng, ?WorkZone $zone): bool
     {
-        if (!$zone) {
+        if (! $zone) {
             return false;
         }
 
@@ -259,7 +278,7 @@ class AttendanceController extends Controller
 
     private function calculateApproxDistance(float $lat, float $lng, ?WorkZone $zone): ?int
     {
-        if (!$zone) {
+        if (! $zone) {
             return null;
         }
 
@@ -282,62 +301,128 @@ class AttendanceController extends Controller
         return (int) round($distance / 10) * 10;
     }
 
+    // private function determineFlag($user, Carbon $date, bool $inZone): ?TimeLogFlag
+    // {
+    //     $flags = [];
+
+    //     $isRestDay = RestDay::where('user_id', $user->id)
+    //         ->where('date', $date)
+    //         ->where('status', \App\Enums\RestDayStatus::Approved)
+    //         ->exists();
+
+    //     if ($isRestDay) {
+    //         $flags[] = TimeLogFlag::WorkedOnRestDay;
+    //     }
+
+    //     if (!$inZone) {
+    //         $flags[] = TimeLogFlag::OutsideAuthorizedSite;
+    //     }
+
+    //     $schedule = $this->getUserSchedule($user);
+    //     $now = now();
+    //     if ($schedule && !$this->isWithinSchedule($now, $schedule)) {
+    //         $flags[] = TimeLogFlag::OutsideSchedule;
+    //     }
+
+    //     return $flags ? $flags[0] : null;
+    // }
+
     private function determineFlag($user, Carbon $date, bool $inZone): ?TimeLogFlag
     {
         $flags = [];
 
+        if ($this->isHoliday($date)) {
+            $flags[] = TimeLogFlag::WorkedOnHoliday;
+        }
+
+        if ($this->isOnApprovedLeave($user, now())) {
+            $flags[] = TimeLogFlag::WorkedDuringLeave;
+        }
+
         $isRestDay = RestDay::where('user_id', $user->id)
             ->where('date', $date)
-            ->where('status', \App\Enums\RestDayStatus::Approved)
+            ->where('status', RestDayStatus::Approved)
             ->exists();
 
         if ($isRestDay) {
             $flags[] = TimeLogFlag::WorkedOnRestDay;
         }
 
-        if (!$inZone) {
+        if (! $inZone) {
             $flags[] = TimeLogFlag::OutsideAuthorizedSite;
         }
 
         $schedule = $this->getUserSchedule($user);
-        $now = now();
-        if ($schedule && !$this->isWithinSchedule($now, $schedule)) {
+        if ($schedule && ! $this->isWithinSchedule(now(), $schedule)) {
             $flags[] = TimeLogFlag::OutsideSchedule;
         }
 
         return $flags ? $flags[0] : null;
     }
 
+    // private function getUserSchedule($user): ?Schedule
+    // {
+    //     $serviceSchedule = $user->service?->schedules()->first();
+    //     if ($serviceSchedule) {
+    //         return $serviceSchedule;
+    //     }
+
+    //     return $user->schedule;
+    // }
+
     private function getUserSchedule($user): ?Schedule
     {
-        $serviceSchedule = $user->service?->schedules()->first();
-        if ($serviceSchedule) {
-            return $serviceSchedule;
-        }
-
-        return $user->schedule;
+        return $user->schedule ?? $user->service?->schedules()->first();
     }
+
+    // private function isWithinSchedule(Carbon $time, Schedule $schedule): bool
+    // {
+    //     $days = json_decode($schedule->days, true);
+    //     $dayOfWeek = $time->dayOfWeek;
+
+    //     if (!in_array($dayOfWeek, $days)) {
+    //         return false;
+    //     }
+
+    //     $startTime = Carbon::parse($schedule->start_time);
+    //     $endTime = Carbon::parse($schedule->end_time);
+    //     $currentTime = $time->format('H:i');
+
+    //     return $currentTime >= $startTime->format('H:i') && $currentTime <= $endTime->format('H:i');
+    // }
 
     private function isWithinSchedule(Carbon $time, Schedule $schedule): bool
     {
         $days = json_decode($schedule->days, true);
-        $dayOfWeek = $time->dayOfWeek;
 
-        if (!in_array($dayOfWeek, $days)) {
+        if (! in_array($time->dayOfWeek, $days)) {
             return false;
         }
 
-        $startTime = Carbon::parse($schedule->start_time);
-        $endTime = Carbon::parse($schedule->end_time);
         $currentTime = $time->format('H:i');
+        $startTime = Carbon::parse($schedule->start_time)->format('H:i');
+        $endTime = Carbon::parse($schedule->end_time)->format('H:i');
 
-        return $currentTime >= $startTime->format('H:i') && $currentTime <= $endTime->format('H:i');
+        if ($currentTime < $startTime || $currentTime > $endTime) {
+            return false;
+        }
+
+        if ($schedule->break_start && $schedule->break_end) {
+            $breakStart = Carbon::parse($schedule->break_start)->format('H:i');
+            $breakEnd = Carbon::parse($schedule->break_end)->format('H:i');
+
+            if ($currentTime >= $breakStart && $currentTime <= $breakEnd) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function calculateLateMinutes($user, Carbon $arrivalTime): int
     {
         $schedule = $this->getUserSchedule($user);
-        if (!$schedule) {
+        if (! $schedule) {
             return 0;
         }
 
@@ -353,7 +438,7 @@ class AttendanceController extends Controller
 
     private function determineSessionStatus(AttendanceSession $session): AttendanceStatus
     {
-        if (!$session->arrival || !$session->departure) {
+        if (! $session->arrival || ! $session->departure) {
             return AttendanceStatus::Incomplete;
         }
 
@@ -365,5 +450,19 @@ class AttendanceController extends Controller
         }
 
         return AttendanceStatus::Incomplete;
+    }
+
+    private function isHoliday(Carbon $date): bool
+    {
+        return Holiday::where('date', $date->toDateString())->exists();
+    }
+
+    private function isOnApprovedLeave($user, Carbon $time): bool
+    {
+        return LeaveRequest::where('user_id', $user->id)
+            ->where('status', 'approved')
+            ->where('start', '<=', $time)
+            ->where('end', '>=', $time)
+            ->exists();
     }
 }

@@ -1,125 +1,133 @@
 import { Form, Head } from '@inertiajs/react';
 import InputError from '@/components/input-error';
+import PasskeyVerify from '@/components/passkey-verify';
 import PasswordInput from '@/components/password-input';
 import TextLink from '@/components/text-link';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-/* @chisel-registration */
-import { register } from '@/routes';
-/* @end-chisel-registration */
+import { useT } from '@/hooks/use-t';
 import { store } from '@/routes/login';
 import { request } from '@/routes/password';
-/* @chisel-passkeys */
-import PasskeyVerify from '@/components/passkey-verify';
-/* @end-chisel-passkeys */
+
+// =========================
+// TYPES
+// =========================
 
 type Props = {
     status?: string;
     canResetPassword: boolean;
 };
 
+// =========================
+// PAGE
+// =========================
+
 export default function Login({ status, canResetPassword }: Props) {
+    const t = useT();
+
+    // =========================
+    // RENDU
+    // =========================
+
     return (
         <>
-            <Head title="Log in" />
+            <Head title={t('Log in')} />
 
-            {/* @chisel-passkeys */}
-            <PasskeyVerify />
-            {/* @end-chisel-passkeys */}
+            {/* Sort du conteneur étroit du layout et se recentre */}
+            <div className="relative left-1/2 w-[min(56rem,calc(100vw-3rem))] -translate-x-1/2">
+                <Card className="overflow-hidden p-0">
+                    <CardContent className="grid p-0 md:grid-cols-2">
+                        <Form
+                            {...store.form()}
+                            resetOnSuccess={['password', 'password_confirmation']}
+                            disableWhileProcessing
+                            className="p-6 md:p-10"
+                        >
+                            {({ processing, errors }) => (
+                                <div className="flex flex-col gap-5">
 
-            <Form
-                {...store.form()}
-                resetOnSuccess={['password']}
-                className="flex flex-col gap-6"
-            >
-                {({ processing, errors }) => (
-                    <>
-                        <div className="grid gap-6">
-                            <div className="grid gap-2">
-                                <Label htmlFor="email">Email address</Label>
-                                <Input
-                                    id="email"
-                                    type="email"
-                                    name="email"
-                                    required
-                                    autoFocus
-                                    tabIndex={1}
-                                    autoComplete="email"
-                                    placeholder="email@example.com"
-                                />
-                                <InputError message={errors.email} />
-                            </div>
+                                    <div className="text-center">
+                                        <h1 className="text-2xl font-bold">
+                                            {t('Welcome back')}
+                                        </h1>
+                                        <p className="text-balance text-sm text-muted-foreground">
+                                            {t('Login to your Presentia account')}
+                                        </p>
+                                    </div>
 
-                            <div className="grid gap-2">
-                                <div className="flex items-center">
-                                    <Label htmlFor="password">Password</Label>
-                                    {canResetPassword && (
-                                        <TextLink
-                                            href={request()}
-                                            className="ml-auto text-sm"
-                                            tabIndex={5}
-                                        >
-                                            Forgot your password?
-                                        </TextLink>
-                                    )}
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="email">{t('Email address')}</Label>
+                                        <Input
+                                            id="email"
+                                            name="email"
+                                            type="email"
+                                            required
+                                            autoFocus
+                                            tabIndex={1}
+                                            autoComplete="email"
+                                            placeholder="email@example.com"
+                                        />
+                                        <InputError message={errors.email} />
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                        <div className="flex items-center">
+                                            <Label htmlFor="password">{t('Password')}</Label>
+                                            {canResetPassword && (
+                                                <TextLink
+                                                    href={request()}
+                                                    className="ml-auto text-sm"
+                                                    tabIndex={5}
+                                                >
+                                                    {t('Forgot your password?')}
+                                                </TextLink>
+                                            )}
+                                        </div>
+                                        <PasswordInput
+                                            id="password"
+                                            name="password"
+                                            required
+                                            tabIndex={2}
+                                            autoComplete="current-password"
+                                            placeholder={t('Password')}
+                                        />
+                                        <InputError message={errors.password} />
+                                    </div>
+
+                                    <div className="flex items-center space-x-3">
+                                        <Checkbox id="remember" name="remember" tabIndex={3} />
+                                        <Label htmlFor="remember">{t('Remember me')}</Label>
+                                    </div>
+
+                                    <Button
+                                        type="submit"
+                                        className="w-full cursor-pointer"
+                                        tabIndex={4}
+                                        disabled={processing}
+                                        data-test="login-button"
+                                    >
+                                        {processing && <Spinner />}
+                                        {t('Log in')}
+                                    </Button>
+
+                                    <p className="text-center text-sm text-muted-foreground">
+    {t('No account? Contact your administrator.')}
+</p>
                                 </div>
-                                <PasswordInput
-                                    id="password"
-                                    name="password"
-                                    required
-                                    tabIndex={2}
-                                    autoComplete="current-password"
-                                    placeholder="Password"
-                                />
-                                <InputError message={errors.password} />
-                            </div>
+                            )}
+                        </Form>
 
-                            <div className="flex items-center space-x-3">
-                                <Checkbox
-                                    id="remember"
-                                    name="remember"
-                                    tabIndex={3}
-                                />
-                                <Label htmlFor="remember">Remember me</Label>
-                            </div>
-
-                            <Button
-                                type="submit"
-                                className="mt-4 w-full"
-                                tabIndex={4}
-                                disabled={processing}
-                                data-test="login-button"
-                            >
-                                {processing && <Spinner />}
-                                Log in
-                            </Button>
+                        <div className="hidden flex-col items-center justify-center gap-4 p-10 text-center text-primary-foreground md:flex">
+                            <img src="/assets/images/23017.jpg" className="object-cover h-full w-full" alt="Image de présentation de cohésion d'équipe" />
                         </div>
+                    </CardContent>
+                </Card>
+            </div>
 
-                        {/* @chisel-registration */}
-                        <div className="text-center text-sm text-muted-foreground">
-                            Don't have an account?{' '}
-                            <TextLink href={register()} tabIndex={5}>
-                                Sign up
-                            </TextLink>
-                        </div>
-                        {/* @end-chisel-registration */}
-                    </>
-                )}
-            </Form>
-
-            {status && (
-                <div className="mb-4 text-center text-sm font-medium text-green-600">
-                    {status}
-                </div>
-            )}
         </>
     );
 }
-
-Login.layout = {
-    title: 'Log in to your account',
-    description: 'Enter your email and password below to log in',
-};

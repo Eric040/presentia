@@ -2,24 +2,24 @@
 
 namespace App\Models;
 
+use App\Enums\Role;
+use App\Models\Concerns\ProtectAdministratorAccount;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
-use App\Models\Concerns\ProtectAdministratorAccount;
-use App\Enums\Role;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * @property int $id
@@ -45,10 +45,10 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  */
 #[Fillable(['name', 'email', 'password', 'identifier', 'profile_photo_path', 'role', 'service_id', 'manager_id', 'rest_quota', 'active', 'trusted_device', 'must_change_password'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
-class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
+class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable, ProtectAdministratorAccount;
+    use HasFactory, Notifiable, ProtectAdministratorAccount, TwoFactorAuthenticatable;
 
     /**
      * Get the attributes that should be cast.
@@ -63,9 +63,7 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
             'password' => 'hashed',
             'active' => 'boolean',
             'must_change_password' => 'boolean',
-            /* @chisel-2fa */
-            'two_factor_confirmed_at' => 'datetime',
-            /* @end-chisel-2fa */
+            'otp_expires_at' => 'datetime',
         ];
     }
 

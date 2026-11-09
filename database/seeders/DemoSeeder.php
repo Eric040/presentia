@@ -2,11 +2,11 @@
 
 namespace Database\Seeders;
 
+use App\Enums\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use App\Enums\Role;
 
 /**
  * Test data for development only (local environment).
@@ -18,6 +18,7 @@ class DemoSeeder extends Seeder
     {
         if (! app()->environment('local')) {
             $this->command?->warn('DemoSeeder ignored: non-local environment.');
+
             return;
         }
 
@@ -49,6 +50,7 @@ class DemoSeeder extends Seeder
                 $u->password = Hash::make('password-de-test-1');
             }
             $u->save();
+
             return $u;
         };
 

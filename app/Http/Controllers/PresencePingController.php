@@ -2,15 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\PresencePing;
-use App\Models\Anomaly;
-use App\Models\WorkZone;
-use App\Enums\PingResult;
-use App\Enums\PingDeliverability;
 use App\Enums\AnomalyStatus;
+use App\Enums\PingDeliverability;
+use App\Enums\PingResult;
+use App\Enums\Role;
+use App\Models\Anomaly;
+use App\Models\PresencePing;
+use App\Models\User;
+use App\Models\WorkZone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Carbon;
+use Inertia\Inertia;
 
 class PresencePingController extends Controller
 {
@@ -19,12 +21,12 @@ class PresencePingController extends Controller
         $user = Auth::user();
         $query = PresencePing::with('user');
 
-        if (!$user->can('viewAny', PresencePing::class)) {
+        if (! $user->can('viewAny', PresencePing::class)) {
             $query->where('user_id', $user->id);
-        } elseif ($user->hasRole(\App\Enums\Role::Manager)) {
+        } elseif ($user->hasRole(Role::Manager)) {
             $query->whereHas('user', function ($q) use ($user) {
                 $q->where('service_id', $user->service_id)
-                  ->orWhere('manager_id', $user->id);
+                    ->orWhere('manager_id', $user->id);
             });
         }
 
@@ -40,12 +42,25 @@ class PresencePingController extends Controller
             $query->where('sent_at', '<=', $request->date_to);
         }
 
-        return $query->orderBy('sent_at', 'desc')->paginate(20);
+        $pings = $query->orderBy('sent_at', 'desc')->get();
+
+        $stats = [
+            'total' => $pings->count(),
+            'pending' => $pings->whereNull('responded_at')->count(),
+            'responded' => $pings->whereNotNull('responded_at')->count(),
+            'undeliverable' => $pings->where('deliverability', PingDeliverability::Undeliverable)->count(),
+        ];
+
+        return Inertia::render('pings/index', [
+            'pings' => $pings,
+            'stats' => $stats,
+        ]);
     }
 
     public function show(PresencePing $ping)
     {
         $this->authorize('view', $ping);
+
         return $ping->load('user');
     }
 
@@ -92,11 +107,11 @@ class PresencePingController extends Controller
         ]);
 
         $user = Auth::user();
-        if (!$user->hasRole(\App\Enums\Role::Administrator, \App\Enums\Role::Hr)) {
+        if (! $user->hasRole(Role::Administrator, Role::Hr)) {
             return response()->json(['message' => 'Non autorisé'], 403);
         }
 
-        $targetUser = \App\Models\User::find($validated['user_id']);
+        $targetUser = User::find($validated['user_id']);
 
         $expiresAt = now()->addMinutes(10);
 
@@ -129,9 +144,10 @@ class PresencePingController extends Controller
     {
         $this->authorize('update', $ping);
 
-        if (!$ping->user->hasActivePushSubscription()) {
+        if (! $ping->user->hasActivePushSubscription()) {
             $ping->update(['deliverability' => PingDeliverability::Undeliverable]);
             $this->createAnomaly($ping, 'ping', 'Ping non délivrable (abonnement push inactif)');
+
             return response()->json($ping);
         }
 
@@ -145,7 +161,7 @@ class PresencePingController extends Controller
 
     private function isInZone(float $lat, float $lng, ?WorkZone $zone): bool
     {
-        if (!$zone) {
+        if (! $zone) {
             return false;
         }
 

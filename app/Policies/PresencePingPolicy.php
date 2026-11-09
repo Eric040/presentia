@@ -2,9 +2,9 @@
 
 namespace App\Policies;
 
+use App\Enums\Role;
 use App\Models\PresencePing;
 use App\Models\User;
-use App\Enums\Role;
 
 class PresencePingPolicy
 {

@@ -116,12 +116,8 @@ return [
 
     'limiters' => [
         'login' => 'login',
-        /* @chisel-2fa */
-        'two-factor' => 'two-factor',
-        /* @end-chisel-2fa */
-        /* @chisel-passkeys */
-        'passkeys' => 'passkeys',
-        /* @end-chisel-passkeys */
+        // 'two-factor' => 'two-factor',
+        // 'passkeys' => 'passkeys',
     ],
 
     /*
@@ -137,7 +133,6 @@ return [
 
     'views' => true,
 
-    /* @chisel-passkeys */
     /*
     |--------------------------------------------------------------------------
     | Passkeys
@@ -147,13 +142,12 @@ return [
     |
     */
 
-    'passkeys' => [
-        'relying_party_id' => parse_url(config('app.url'), PHP_URL_HOST),
-        'allowed_origins' => [config('app.url')],
-        'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
-        'timeout' => 60000,
-    ],
-    /* @end-chisel-passkeys */
+    // 'passkeys' => [
+    //     'relying_party_id' => parse_url(config('app.url'), PHP_URL_HOST),
+    //     'allowed_origins' => [config('app.url')],
+    //     'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
+    //     'timeout' => 60000,
+    // ],
 
     /*
     |--------------------------------------------------------------------------
@@ -167,25 +161,17 @@ return [
     */
 
     'features' => [
-        /* @chisel-registration */
-        Features::registration(),
-        /* @end-chisel-registration */
+        // Features::registration(),
         Features::resetPasswords(),
-        /* @chisel-email-verification */
         Features::emailVerification(),
-        /* @end-chisel-email-verification */
-        /* @chisel-2fa */
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-            // 'window' => 0
-        ]),
-        /* @end-chisel-2fa */
-        /* @chisel-passkeys */
-        Features::passkeys([
-            'confirmPassword' => true,
-        ]),
-        /* @end-chisel-passkeys */
+        // Features::twoFactorAuthentication([
+        //     'confirm' => true,
+        //     'confirmPassword' => false,
+        //     'window' => 0
+        // ]),
+        // Features::passkeys([
+        //     'confirmPassword' => false,
+        // ]),
     ],
 
 ];

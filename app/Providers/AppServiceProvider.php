@@ -2,12 +2,15 @@
 
 namespace App\Providers;
 
+use App\Models\Service;
+use App\Models\User;
+use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
-use Illuminate\Database\Eloquent\Relations\Relation;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,11 +27,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Carbon::setLocale('fr');
+
         $this->configureDefaults();
 
         Relation::morphMap([
-            'service' => \App\Models\Service::class,
-            'user' => \App\Models\User::class,
+            'service' => Service::class,
+            'user' => User::class,
         ]);
     }
 
@@ -53,5 +58,4 @@ class AppServiceProvider extends ServiceProvider
             : null,
         );
     }
-
 }

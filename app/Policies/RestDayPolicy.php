@@ -2,9 +2,10 @@
 
 namespace App\Policies;
 
-use App\Models\RestDay;
-use App\Models\User;
 use App\Enums\Role;
+use App\Models\RestDay;
+use App\Models\Substitution;
+use App\Models\User;
 
 class RestDayPolicy
 {
@@ -61,11 +62,17 @@ class RestDayPolicy
         }
 
         if ($user->hasRole(Role::Hr)) {
-            return $restDay->user->manager_id === $user->id;
+            return Substitution::isAdministratorUnavailable('validations');
         }
 
         if ($user->hasRole(Role::Manager)) {
-            return $restDay->user->manager_id === $user->id;
+            if ($restDay->user->manager_id === $user->id) {
+                return true;
+            }
+        }
+
+        if (Substitution::canApproveAsSubstitute($user->id, 'validations')) {
+            return true;
         }
 
         return false;

@@ -2,10 +2,10 @@
 
 namespace Database\Seeders;
 
+use App\Enums\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
-use App\Enums\Role;
 
 /**
  * Creates the administrator account (the director) from .env:
@@ -24,11 +24,13 @@ class AdministratorSeeder extends Seeder
 
         if (! $name || ! $identifier || ! $email || ! $password) {
             $this->command?->error('Missing PRESENTIA_ADMIN_* variables in .env: administrator not created.');
+
             return;
         }
 
         if (strlen($password) < 12) {
             $this->command?->error('PRESENTIA_ADMIN_PASSWORD: minimum 12 characters (S2.1).');
+
             return;
         }
 

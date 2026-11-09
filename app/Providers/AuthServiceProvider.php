@@ -2,26 +2,25 @@
 
 namespace App\Providers;
 
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
-use App\Models\LeaveRequest;
-use App\Models\RestDay;
-use App\Models\AttendanceSession;
-use App\Models\TimeLog;
-use App\Models\PresencePing;
 use App\Models\Anomaly;
+use App\Models\AttendanceSession;
 use App\Models\Conversation;
+use App\Models\LeaveRequest;
 use App\Models\Message;
+use App\Models\PresencePing;
+use App\Models\RestDay;
+use App\Models\TimeLog;
 use App\Models\User;
-use App\Policies\LeaveRequestPolicy;
-use App\Policies\RestDayPolicy;
-use App\Policies\AttendanceSessionPolicy;
-use App\Policies\TimeLogPolicy;
-use App\Policies\PresencePingPolicy;
 use App\Policies\AnomalyPolicy;
+use App\Policies\AttendanceSessionPolicy;
 use App\Policies\ConversationPolicy;
+use App\Policies\LeaveRequestPolicy;
 use App\Policies\MessagePolicy;
+use App\Policies\PresencePingPolicy;
+use App\Policies\RestDayPolicy;
+use App\Policies\TimeLogPolicy;
 use App\Policies\UserPolicy;
+use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 
 class AuthServiceProvider extends ServiceProvider
 {

@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\RestDayStatus;
+use App\Enums\Role;
 use App\Models\RestDay;
 use App\Models\User;
-use App\Enums\RestDayStatus;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
 
 class RestDayController extends Controller
 {
@@ -16,12 +18,12 @@ class RestDayController extends Controller
         $user = Auth::user();
         $query = RestDay::with(['user', 'decider']);
 
-        if (!$user->can('viewAny', RestDay::class)) {
+        if (! $user->can('viewAny', RestDay::class)) {
             $query->where('user_id', $user->id);
-        } elseif ($user->hasRole(\App\Enums\Role::Manager)) {
+        } elseif ($user->hasRole(Role::Manager)) {
             $query->whereHas('user', function ($q) use ($user) {
                 $q->where('service_id', $user->service_id)
-                  ->orWhere('manager_id', $user->id);
+                    ->orWhere('manager_id', $user->id);
             });
         }
 
@@ -33,12 +35,25 @@ class RestDayController extends Controller
             $query->whereMonth('date', $request->month);
         }
 
-        return $query->orderBy('date', 'desc')->paginate(20);
+        $restDays = $query->orderBy('date', 'desc')->get();
+
+        $stats = [
+            'total' => $restDays->count(),
+            'pending' => $restDays->where('status', RestDayStatus::Pending)->count(),
+            'approved' => $restDays->where('status', RestDayStatus::Approved)->count(),
+            'rejected' => $restDays->where('status', RestDayStatus::Rejected)->count(),
+        ];
+
+        return Inertia::render('rest-days/index', [
+            'restDays' => $restDays,
+            'stats' => $stats,
+        ]);
     }
 
     public function show(RestDay $restDay)
     {
         $this->authorize('view', $restDay);
+
         return $restDay->load(['user', 'decider']);
     }
 
@@ -74,6 +89,7 @@ class RestDayController extends Controller
         ]);
 
         $restDay->update($validated);
+
         return response()->json($restDay);
     }
 
@@ -81,6 +97,7 @@ class RestDayController extends Controller
     {
         $this->authorize('delete', $restDay);
         $restDay->delete();
+
         return response()->noContent();
     }
 
@@ -88,21 +105,8 @@ class RestDayController extends Controller
     {
         $this->authorize('approve', $restDay);
 
-        if (!$restDay->status->isPending()) {
+        if (! $restDay->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être approuvées'], 400);
-        }
-
-        $user = $restDay->user;
-
-        $admissibleDays = $this->calculateAdmissibleDays($user);
-        $remainingQuota = $user->rest_quota;
-
-        if ($admissibleDays <= $remainingQuota) {
-            return response()->json([
-                'message' => 'Refus impossible : les jours admissibles restants sont inférieurs ou égaux au quota restant',
-                'admissible_days' => $admissibleDays,
-                'remaining_quota' => $remainingQuota,
-            ], 400);
         }
 
         $restDay->update([
@@ -111,7 +115,7 @@ class RestDayController extends Controller
             'decided_at' => now(),
         ]);
 
-        $user->decrement('rest_quota');
+        $restDay->user->decrement('rest_quota');
 
         return response()->json($restDay->load('user', 'decider'));
     }
@@ -124,8 +128,20 @@ class RestDayController extends Controller
             'justification' => 'required|string|max:1000',
         ]);
 
-        if (!$restDay->status->isPending()) {
+        if (! $restDay->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être refusées'], 400);
+        }
+
+        $user = $restDay->user;
+        $admissibleDays = $this->calculateAdmissibleDays($user);
+        $remainingQuota = $user->rest_quota;
+
+        if ($admissibleDays <= $remainingQuota) {
+            return response()->json([
+                'message' => 'Refus impossible : les jours admissibles restants sont inférieurs ou égaux au quota restant',
+                'admissible_days' => $admissibleDays,
+                'remaining_quota' => $remainingQuota,
+            ], 400);
         }
 
         $restDay->update([
@@ -142,11 +158,12 @@ class RestDayController extends Controller
     {
         $this->authorize('update', $restDay);
 
-        if (!$restDay->status->isPending()) {
+        if (! $restDay->status->isPending()) {
             return response()->json(['message' => 'Seules les demandes en attente peuvent être annulées'], 400);
         }
 
         $restDay->update(['status' => RestDayStatus::Cancelled]);
+
         return response()->json($restDay);
     }
 

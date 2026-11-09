@@ -19,6 +19,7 @@ return new class extends Migration
             $table->string('status', 20)->default('pending');
             $table->text('comment')->nullable();
             $table->unsignedSmallInteger('reminder_count')->default(0);
+            $table->dateTime('last_reminded_at')->nullable();
             $table->dateTime('escalated_at')->nullable();
             $table->foreignId('approver_id')->nullable()->constrained('users');
             $table->dateTime('decided_at')->nullable();

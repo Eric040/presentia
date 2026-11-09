@@ -2,193 +2,94 @@
 
 namespace App\Jobs;
 
+use App\Enums\Role;
 use App\Models\LeaveRequest;
 use App\Models\RestDay;
-use App\Models\InternalNotification;
-use App\Models\Substitution;
 use App\Models\Setting;
-use App\Enums\LeaveStatus;
-use App\Enums\RestDayStatus;
-use App\Enums\SendStatus;
+use App\Models\Substitution;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Collection;
 
 class SendReminderJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct()
-    {
-        //
-    }
-
     public function handle(): void
     {
-        $reminderInterval = (int) Setting::get('reminders.interval_hours', 4);
-        $maxReminders = (int) Setting::get('reminders.max_count', 3);
+        $hours = (int) Setting::get('reminder_delay_hours', 4);
+        $max = max(1, (int) Setting::get('reminders_before_escalation', 3));
 
-        $this->remindLeaveRequests($reminderInterval, $maxReminders);
-        $this->remindRestDays($reminderInterval, $maxReminders);
+        $this->remind(LeaveRequest::pending(), 'leave_request', $hours, $max);
+        $this->remind(RestDay::pending(), 'rest_day', $hours, $max);
     }
 
-    private function remindLeaveRequests(int $intervalHours, int $maxReminders): void
+    // Chaque tranche de $max rappels fait passer la demande au niveau suivant de la chaîne.
+    private function remind(Builder $query, string $kind, int $hours, int $max): void
     {
-        $pendingRequests = LeaveRequest::where('status', LeaveStatus::Pending)
-            ->where('reminder_count', '<', $maxReminders)
-            ->where(function ($query) use ($intervalHours) {
-                $query->whereNull('created_at')
-                    ->orWhere('created_at', '<=', now()->subHours($intervalHours));
+        $threshold = now()->subHours($hours);
+
+        $items = $query
+            ->where(function ($q) use ($threshold) {
+                $q->where('last_reminded_at', '<=', $threshold)
+                    ->orWhere(fn ($q) => $q->whereNull('last_reminded_at')->where('created_at', '<=', $threshold));
             })
-            ->where(function ($query) use ($intervalHours) {
-                $lastReminder = now()->subHours($intervalHours);
-                $query->whereNull('escalated_at')
-                    ->orWhere('escalated_at', '<=', $lastReminder);
-            })
+            ->with('user.manager')
             ->get();
 
-        foreach ($pendingRequests as $request) {
-            $approver = $this->getApprover($request->user);
+        foreach ($items as $item) {
+            $chain = $this->chain($item, $kind);
+            $level = intdiv($item->reminder_count, $max);
 
-            if (!$approver) {
-                $this->escalate($request);
+            if ($level >= $chain->count()) {
                 continue;
             }
 
-            $notification = InternalNotification::create([
-                'recipient_id' => $approver->id,
-                'title' => 'Rappel : Permission en attente',
-                'content' => "La permission de {$request->user->name} du {$request->start->format('d/m/Y')} est en attente d'approbation.",
-                'related_type' => 'leave_request',
-                'related_id' => $request->id,
-                'send_status' => SendStatus::Pending,
+            $chain[$level]->internalNotifications()->create([
+                'type' => $level === 0 ? 'reminder' : 'escalation',
+                'channel' => 'push',
+                'minimal_content' => 'Une demande attend votre décision.',
+                'data' => ['kind' => $kind, 'id' => $item->id],
             ]);
 
-            $request->increment('reminder_count');
-            $request->update(['escalated_at' => now()]);
+            $item->reminder_count++;
+            $item->last_reminded_at = now();
 
-            Log::info("Reminder sent for leave request {$request->id} to approver {$approver->id}");
-        }
-    }
-
-    private function remindRestDays(int $intervalHours, int $maxReminders): void
-    {
-        $pendingRestDays = RestDay::where('status', RestDayStatus::Pending)
-            ->where('reminder_count', '<', $maxReminders)
-            ->where(function ($query) use ($intervalHours) {
-                $query->whereNull('created_at')
-                    ->orWhere('created_at', '<=', now()->subHours($intervalHours));
-            })
-            ->where(function ($query) use ($intervalHours) {
-                $lastReminder = now()->subHours($intervalHours);
-                $query->whereNull('escalated_at')
-                    ->orWhere('escalated_at', '<=', $lastReminder);
-            })
-            ->get();
-
-        foreach ($pendingRestDays as $restDay) {
-            $approver = $this->getApprover($restDay->user);
-
-            if (!$approver) {
-                $this->escalateRestDay($restDay);
-                continue;
+            if ($level > 0 && $item instanceof LeaveRequest) {
+                $item->escalated_at ??= now();
             }
 
-            $notification = InternalNotification::create([
-                'recipient_id' => $approver->id,
-                'title' => 'Rappel : Jour de repos en attente',
-                'content' => "Le jour de repos de {$restDay->user->name} pour le {$restDay->date->format('d/m/Y')} est en attente d'approbation.",
-                'related_type' => 'rest_day',
-                'related_id' => $restDay->id,
-                'send_status' => SendStatus::Pending,
-            ]);
-
-            $restDay->increment('reminder_count');
-            $restDay->update(['escalated_at' => now()]);
-
-            Log::info("Reminder sent for rest day {$restDay->id} to approver {$approver->id}");
+            $item->save();
         }
     }
 
-    private function getApprover($user): ?\App\Models\User
+    // Permission : responsable, administrateur, puis suppléants. Jour de repos : administrateur, puis suppléants.
+    private function chain(Model $item, string $kind): Collection
     {
-        if ($user->manager_id) {
-            return \App\Models\User::find($user->manager_id);
-        }
+        $admin = User::where('role', Role::Administrator)->where('active', true)->first();
 
-        return \App\Models\User::where('role', \App\Enums\Role::Administrator)->first();
-    }
+        $substitutes = $admin
+            ? Substitution::active()
+                ->where('delegator_id', $admin->id)
+                ->where('scope', 'validations')
+                ->orderBy('order')
+                ->with('substitute')
+                ->get()
+                ->pluck('substitute')
+            : collect();
 
-    private function escalate(LeaveRequest $request): void
-    {
-        $substitution = Substitution::where('delegator_id', $request->user->manager_id)
-            ->where('scope', 'validations')
-            ->orderBy('order')
-            ->first();
+        $manager = $kind === 'leave_request' ? $item->user->manager : null;
 
-        if ($substitution) {
-            $notification = InternalNotification::create([
-                'recipient_id' => $substitution->substitute_id,
-                'title' => 'Escalade : Permission en attente',
-                'content' => "La permission de {$request->user->name} a été escaladée suite à l'absence de réponse de l'approbateur.",
-                'related_type' => 'leave_request',
-                'related_id' => $request->id,
-                'send_status' => SendStatus::Pending,
-            ]);
-
-            Log::info("Leave request {$request->id} escalated to substitute {$substitution->substitute_id}");
-        } else {
-            $admin = \App\Models\User::where('role', \App\Enums\Role::Administrator)->first();
-            if ($admin) {
-                $notification = InternalNotification::create([
-                    'recipient_id' => $admin->id,
-                    'title' => 'Escalade : Permission en attente',
-                    'content' => "La permission de {$request->user->name} a été escaladée à l'administrateur.",
-                    'related_type' => 'leave_request',
-                    'related_id' => $request->id,
-                    'send_status' => SendStatus::Pending,
-                ]);
-
-                Log::info("Leave request {$request->id} escalated to administrator");
-            }
-        }
-    }
-
-    private function escalateRestDay(RestDay $restDay): void
-    {
-        $substitution = Substitution::where('delegator_id', $restDay->user->manager_id)
-            ->where('scope', 'validations')
-            ->orderBy('order')
-            ->first();
-
-        if ($substitution) {
-            $notification = InternalNotification::create([
-                'recipient_id' => $substitution->substitute_id,
-                'title' => 'Escalade : Jour de repos en attente',
-                'content' => "Le jour de repos de {$restDay->user->name} a été escaladé suite à l'absence de réponse de l'approbateur.",
-                'related_type' => 'rest_day',
-                'related_id' => $restDay->id,
-                'send_status' => SendStatus::Pending,
-            ]);
-
-            Log::info("Rest day {$restDay->id} escalated to substitute {$substitution->substitute_id}");
-        } else {
-            $admin = \App\Models\User::where('role', \App\Enums\Role::Administrator)->first();
-            if ($admin) {
-                $notification = InternalNotification::create([
-                    'recipient_id' => $admin->id,
-                    'title' => 'Escalade : Jour de repos en attente',
-                    'content' => "Le jour de repos de {$restDay->user->name} a été escaladé à l'administrateur.",
-                    'related_type' => 'rest_day',
-                    'related_id' => $restDay->id,
-                    'send_status' => SendStatus::Pending,
-                ]);
-
-                Log::info("Rest day {$restDay->id} escalated to administrator");
-            }
-        }
+        return collect([$manager, $admin])
+            ->merge($substitutes)
+            ->filter(fn ($user) => $user && $user->active && $user->id !== $item->user_id)
+            ->unique('id')
+            ->values();
     }
 }

@@ -18,6 +18,7 @@ return new class extends Migration
             $table->foreignId('decided_by')->nullable()->constrained('users');
             $table->dateTime('decided_at')->nullable();
             $table->unsignedSmallInteger('reminder_count')->default(0);
+            $table->dateTime('last_reminded_at')->nullable();
             $table->timestamps();
             $table->index(['user_id', 'date']);
             $table->index('status');

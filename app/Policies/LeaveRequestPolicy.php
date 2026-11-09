@@ -2,10 +2,10 @@
 
 namespace App\Policies;
 
-use App\Models\LeaveRequest;
-use App\Models\User;
 use App\Enums\Role;
-use Illuminate\Auth\Access\Response;
+use App\Models\LeaveRequest;
+use App\Models\Substitution;
+use App\Models\User;
 
 class LeaveRequestPolicy
 {
@@ -62,11 +62,17 @@ class LeaveRequestPolicy
         }
 
         if ($user->hasRole(Role::Hr)) {
-            return $request->user->manager_id === $user->id;
+            return Substitution::isAdministratorUnavailable('validations');
         }
 
         if ($user->hasRole(Role::Manager)) {
-            return $request->user->manager_id === $user->id;
+            if ($request->user->manager_id === $user->id) {
+                return true;
+            }
+        }
+
+        if (Substitution::canApproveAsSubstitute($user->id, 'validations')) {
+            return true;
         }
 
         return false;

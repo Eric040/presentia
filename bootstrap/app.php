@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Middleware\ForcePasswordChange;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RequireOtp;
+use App\Http\Middleware\RequirePushSubscription;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -21,7 +24,13 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
-            \App\Http\Middleware\ForcePasswordChange::class,
+            ForcePasswordChange::class,
+            RequireOtp::class,
+        ]);
+
+        $middleware->alias([
+            'push' => RequirePushSubscription::class,
+            'otp' => RequireOtp::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -2,9 +2,9 @@
 
 namespace App\Policies;
 
+use App\Enums\Role;
 use App\Models\TimeLog;
 use App\Models\User;
-use App\Enums\Role;
 
 class TimeLogPolicy
 {
@@ -16,6 +16,7 @@ class TimeLogPolicy
 
         if ($user->hasRole(Role::Manager)) {
             $sessionUser = $log->session->user;
+
             return $sessionUser->service_id === $user->service_id
                 || $sessionUser->manager_id === $user->id;
         }

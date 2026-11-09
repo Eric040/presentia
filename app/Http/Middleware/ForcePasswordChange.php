@@ -27,16 +27,19 @@ class ForcePasswordChange
         'security.edit',
         'user-password.update',
         'logout',
+        'password.confirm',
+        'password.confirm.store',
+        'otp',
     ];
 
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
 
-        if ($user && $user->must_change_password && ! $request->routeIs(...self::ROUTES_AUTORISEES)) {
-            return redirect()->route('user-password.edit');
+        if (! $user || ! $user->must_change_password || $request->routeIs(...self::ROUTES_AUTORISEES)) {
+            return $next($request);
         }
 
-        return $next($request);
+        return redirect()->route('security.edit');
     }
 }
