@@ -74,6 +74,7 @@
     "or, enter the code manually": "ou, entrez le code manuellement",
     "Back": "Retour",
     "Confirm": "Confirmer",
+    "Confirm password": "Confirmer le mot de passe",
     "Two-factor authentication enabled": "Authentification à deux facteurs activée",
     "Two-factor authentication is now enabled. Scan the QR code or enter the setup key in your authenticator app.": "L'authentification à deux facteurs est maintenant activée. Scannez le code QR ou entrez la clé de configuration dans votre application d'authentification.",
     "Close": "Fermer",
@@ -83,5 +84,5 @@
     "To finish enabling two-factor authentication, scan the QR code or enter the setup key in your authenticator app": "Pour terminer l'activation de l'authentification à deux facteurs, scannez le code QR ou entrez la clé de configuration dans votre application d'authentification",
     "Password change required": "Changement de mot de passe requis",
     "For your security, you must change your temporary password before continuing.": "Pour votre sécurité, vous devez changer votre mot de passe temporaire avant de continuer.",
-    "You can't access another page without changing your password.": "Vous ne pourrez pas accéder à d'autres pages sans modifier votre mot de passe actuel.",
+    "You can't access another page without changing your password.": "Vous ne pourrez pas accéder à d'autres pages sans modifier votre mot de passe actuel."
 }
