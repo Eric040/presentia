@@ -11,6 +11,8 @@ export type UseAppearanceReturn = {
 
 const listeners = new Set<() => void>();
 let currentAppearance: Appearance = 'system';
+// Snapshot résolu, mis à jour seulement côté client
+let currentResolved: ResolvedAppearance = 'light';
 
 const prefersDark = (): boolean => {
     if (typeof window === 'undefined') {
@@ -42,14 +44,15 @@ const isDarkMode = (appearance: Appearance): boolean => {
 };
 
 const applyTheme = (appearance: Appearance): void => {
+    // Recalcule et met en cache la valeur résolue (client uniquement)
+    currentResolved = isDarkMode(appearance) ? 'dark' : 'light';
+
     if (typeof document === 'undefined') {
         return;
     }
 
-    const isDark = isDarkMode(appearance);
-
-    document.documentElement.classList.toggle('dark', isDark);
-    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', currentResolved === 'dark');
+    document.documentElement.style.colorScheme = currentResolved;
 };
 
 const subscribe = (callback: () => void) => {
@@ -82,8 +85,8 @@ export function initializeTheme(): void {
 
     currentAppearance = getStoredAppearance();
     applyTheme(currentAppearance);
+    notify();
 
-    // Set up system theme change listener
     mediaQuery()?.addEventListener('change', handleSystemThemeChange);
 }
 
@@ -94,17 +97,17 @@ export function useAppearance(): UseAppearanceReturn {
         () => 'system',
     );
 
-    const resolvedAppearance: ResolvedAppearance = isDarkMode(appearance)
-        ? 'dark'
-        : 'light';
+    // resolvedAppearance vient maintenant du store, pas d'un calcul live avec matchMedia
+    const resolvedAppearance: ResolvedAppearance = useSyncExternalStore(
+        subscribe,
+        () => currentResolved,
+        () => 'light', // valeur fixe côté serveur ET au premier rendu client
+    );
 
     const updateAppearance = (mode: Appearance): void => {
         currentAppearance = mode;
 
-        // Store in localStorage for client-side persistence...
         localStorage.setItem('appearance', mode);
-
-        // Store in cookie for SSR...
         setCookie('appearance', mode);
 
         applyTheme(mode);

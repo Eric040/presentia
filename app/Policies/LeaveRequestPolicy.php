@@ -38,6 +38,11 @@ class LeaveRequestPolicy
 
     public function create(User $user): bool
     {
+        // L'administrateur ne crée pas de demandes, il valide celles des autres
+        if ($user->hasRole(Role::Administrator)) {
+            return false;
+        }
+
         return true;
     }
 

@@ -1,36 +1,45 @@
 import { Head } from '@inertiajs/react';
-import { PlaceholderPattern } from '@/components/ui/placeholder-pattern';
+
+import { ActivityChart, type Point } from '@/components/dashboard/activity-chart';
+import { RequestsTable, type Row } from '@/components/dashboard/requests-table';
+import { StatCards, type Stat } from '@/components/dashboard/stat-cards';
 import { dashboard } from '@/routes';
 
-export default function Dashboard() {
+type Props = {
+    view: 'admin' | 'personal';
+    stats: Stat[];
+    chartData: Point[];
+    requests: Row[];
+};
+
+// =========================
+// RENDU
+// =========================
+
+export default function Dashboard({ view, stats, chartData, requests }: Props) {
+    const admin = view === 'admin';
+
     return (
         <>
-            <Head title="Dashboard" />
-            <div className="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
-                <div className="grid auto-rows-min gap-4 md:grid-cols-3">
-                    <div className="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <PlaceholderPattern className="absolute inset-0 size-full stroke-neutral-900/20 dark:stroke-neutral-100/20" />
-                    </div>
-                    <div className="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <PlaceholderPattern className="absolute inset-0 size-full stroke-neutral-900/20 dark:stroke-neutral-100/20" />
-                    </div>
-                    <div className="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <PlaceholderPattern className="absolute inset-0 size-full stroke-neutral-900/20 dark:stroke-neutral-100/20" />
-                    </div>
-                </div>
-                <div className="relative min-h-[100vh] flex-1 overflow-hidden rounded-xl border border-sidebar-border/70 md:min-h-min dark:border-sidebar-border">
-                    <PlaceholderPattern className="absolute inset-0 size-full stroke-neutral-900/20 dark:stroke-neutral-100/20" />
-                </div>
+            <Head title="Tableau de bord" />
+            <div className="@container/main flex flex-col gap-6 p-4 lg:p-6">
+                <StatCards stats={stats} />
+                <ActivityChart
+                    data={chartData}
+                    title={admin ? 'Présences par jour' : 'Heures travaillées'}
+                    label={admin ? 'Présents' : 'Heures'}
+                />
+                <RequestsTable
+                    rows={requests}
+                    showUser={admin}
+                    title={admin ? 'Demandes à valider' : 'Mes dernières demandes'}
+                    description={admin ? 'Les plus anciennes en attente' : 'Permissions, jours de repos et régularisations'}
+                />
             </div>
         </>
     );
 }
 
 Dashboard.layout = {
-    breadcrumbs: [
-        {
-            title: 'Dashboard',
-            href: dashboard(),
-        },
-    ],
+    breadcrumbs: [{ title: 'Tableau de bord', href: dashboard() }],
 };

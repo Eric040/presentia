@@ -92,7 +92,8 @@ class DemoSeeder extends Seeder
         if (! DB::table('schedules')->exists()) {
             DB::table('schedules')->insert([
                 'service_id' => $developpement, 'days' => json_encode([1, 2, 3, 4, 5]),
-                'start_time' => '08:00', 'end_time' => '17:00',
+                'start_time' => '09:00', 'end_time' => '18:30',
+                'break_start' => '13:00', 'break_end' => '14:30',
                 'created_at' => $now, 'updated_at' => $now,
             ]);
         }

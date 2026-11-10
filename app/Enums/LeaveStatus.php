@@ -20,4 +20,9 @@ enum LeaveStatus: string
             self::Expired => 'Expirée',
         };
     }
+
+    public function isPending(): bool
+    {
+        return $this === self::Pending;
+    }
 }

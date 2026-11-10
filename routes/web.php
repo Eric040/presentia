@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AnomalyController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\PresencePingController;
 use App\Http\Controllers\PushSubscriptionController;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\Route;
 Route::inertia('/', 'welcome')->name('home');
 
 Route::middleware(['auth', 'verified', 'push'])->group(function () {
-    Route::inertia('dashboard', 'dashboard')->name('dashboard');
+    Route::get('dashboard', DashboardController::class)->name('dashboard');
 
     Route::prefix('leave-requests')->name('leave-requests.')->group(function () {
         Route::get('/', [LeaveRequestController::class, 'index'])->name('index');
