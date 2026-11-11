@@ -8,6 +8,7 @@ use App\Http\Controllers\PresencePingController;
 use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\RestDayController;
 use App\Http\Controllers\SubstitutionController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'welcome')->name('home');
@@ -29,13 +30,21 @@ Route::middleware(['auth', 'verified', 'push'])->group(function () {
 
     Route::prefix('rest-days')->name('rest-days.')->group(function () {
         Route::get('/', [RestDayController::class, 'index'])->name('index');
-        Route::get('/{restDay}', [RestDayController::class, 'show'])->name('show');
         Route::post('/', [RestDayController::class, 'store'])->name('store');
-        Route::patch('/{restDay}', [RestDayController::class, 'update'])->name('update');
-        Route::delete('/{restDay}', [RestDayController::class, 'destroy'])->name('destroy');
         Route::patch('/{restDay}/approve', [RestDayController::class, 'approve'])->name('approve');
         Route::patch('/{restDay}/reject', [RestDayController::class, 'reject'])->name('reject');
         Route::patch('/{restDay}/cancel', [RestDayController::class, 'cancel'])->name('cancel');
+    });
+
+    // User management (admin only)
+    Route::prefix('users')->name('users.')->group(function () {
+        Route::get('/', [UserController::class, 'index'])->name('index');
+        Route::post('/', [UserController::class, 'store'])->name('store');
+        Route::patch('/{user}/quota', [UserController::class, 'updateQuota'])->name('quota');
+        Route::patch('/{user}/role', [UserController::class, 'updateRole'])->name('role');
+        Route::patch('/{user}/service', [UserController::class, 'updateService'])->name('service');
+        Route::patch('/{user}/deactivate', [UserController::class, 'deactivate'])->name('deactivate');
+        Route::patch('/{user}/activate', [UserController::class, 'activate'])->name('activate');
     });
 
     Route::resource('substitutions', SubstitutionController::class)->except(['create', 'show', 'edit']);
@@ -52,6 +61,7 @@ Route::middleware(['auth', 'verified', 'push'])->group(function () {
     Route::controller(PresencePingController::class)->prefix('pings')->name('pings.')->group(function () {
         Route::get('/', 'index')->name('index');
         Route::get('{presencePing}', 'show')->name('show')->whereNumber('presencePing');
+        Route::post('/', 'sendPing')->name('send');
         Route::post('{presencePing}/respond', 'respond')->name('respond');
         Route::patch('{presencePing}/undeliverable', 'markUndeliverable')->name('undeliverable');
     });

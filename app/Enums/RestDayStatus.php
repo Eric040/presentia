@@ -18,4 +18,9 @@ enum RestDayStatus: string
             self::Cancelled => 'Annulé',
         };
     }
+
+    public function isPending(): bool
+    {
+        return $this === self::Pending;
+    }
 }

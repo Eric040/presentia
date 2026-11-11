@@ -15,6 +15,15 @@ use Inertia\Response;
 
 class AnomalyController extends Controller
 {
+    private const TYPE_LABELS = [
+        'ping_out_of_zone'   => 'Hors zone (ping)',
+        'ping_no_response'   => 'Ping sans réponse',
+        'ping_undeliverable' => 'Ping non délivrable',
+        'ping'               => 'Ping',
+        'session_incomplete' => 'Session incomplète',
+        'absence'            => 'Absence',
+    ];
+
     public function index(Request $request): Response
     {
         Gate::authorize('viewAny', Anomaly::class);
@@ -22,12 +31,11 @@ class AnomalyController extends Controller
         $user = $request->user();
 
         $anomalies = Anomaly::query()
-            ->with('user:id,name')
+            ->with('user:id,name', 'processor:id,name')
             ->when(! $user->hasRole(Role::Administrator, Role::Hr), function ($query) use ($user) {
                 $ids = $user->hasRole(Role::Manager)
                     ? $user->team()->pluck('id')->push($user->id)
-                    : [$user->id];
-
+                    : collect([$user->id]);
                 $query->whereIn('user_id', $ids);
             })
             ->when(
@@ -38,15 +46,34 @@ class AnomalyController extends Controller
             ->get();
 
         $stats = [
-            'total' => $anomalies->count(),
-            'pending' => $anomalies->where('status', AnomalyStatus::ToProcess)->count(),
+            'total'     => $anomalies->count(),
+            'pending'   => $anomalies->where('status', AnomalyStatus::ToProcess)->count(),
             'justified' => $anomalies->whereNotNull('justification')->count(),
             'processed' => $anomalies->whereIn('status', [AnomalyStatus::Validated, AnomalyStatus::Rejected])->count(),
         ];
 
+        $serialized = $anomalies->map(fn ($a) => [
+            'id'            => $a->id,
+            'user'          => $a->user ? ['id' => $a->user->id, 'name' => $a->user->name] : null,
+            'type'          => $a->type,
+            'type_label'    => self::TYPE_LABELS[$a->type] ?? $a->type,
+            'date'          => $a->date->toDateString(),
+            'status'        => $a->status->value,
+            'justification' => $a->justification,
+            'processor'     => $a->processor
+                ? ['id' => $a->processor->id, 'name' => $a->processor->name]
+                : null,
+            'can_justify'   => $a->status === AnomalyStatus::ToProcess
+                && $a->user_id === $user->id,
+            'can_process'   => $a->status === AnomalyStatus::ToProcess
+                && $a->user_id !== $user->id
+                && $user->can('process', $a),
+        ]);
+
         return Inertia::render('anomalies/index', [
-            'anomalies' => $anomalies,
-            'stats' => $stats,
+            'anomalies' => $serialized,
+            'stats'     => $stats,
+            'filters'   => $request->only('status'),
         ]);
     }
 
@@ -54,8 +81,22 @@ class AnomalyController extends Controller
     {
         Gate::authorize('view', $anomaly);
 
+        $anomaly->load('user:id,name', 'processor:id,name');
+
         return Inertia::render('anomalies/show', [
-            'anomaly' => $anomaly->load('user:id,name', 'processor:id,name'),
+            'anomaly' => [
+                'id'            => $anomaly->id,
+                'user'          => $anomaly->user ? ['id' => $anomaly->user->id, 'name' => $anomaly->user->name] : null,
+                'type'          => $anomaly->type,
+                'type_label'    => self::TYPE_LABELS[$anomaly->type] ?? $anomaly->type,
+                'date'          => $anomaly->date->toDateString(),
+                'status'        => $anomaly->status->value,
+                'justification' => $anomaly->justification,
+                'processor'     => $anomaly->processor
+                    ? ['id' => $anomaly->processor->id, 'name' => $anomaly->processor->name]
+                    : null,
+                'processed_at'  => $anomaly->processed_at?->toIso8601String(),
+            ],
         ]);
     }
 
@@ -69,7 +110,6 @@ class AnomalyController extends Controller
             'justification' => ['required', 'string', 'max:1000'],
         ]));
 
-        // Le texte libre reste hors du journal : on trace seulement le fait.
         ActivityLog::record('anomaly.justified', $anomaly, null, ['justified' => true]);
 
         return back();
@@ -86,12 +126,17 @@ class AnomalyController extends Controller
             'decision' => ['required', Rule::in([AnomalyStatus::Validated->value, AnomalyStatus::Rejected->value])],
         ]);
 
-        $anomaly->status = AnomalyStatus::from($data['decision']);
+        $anomaly->status       = AnomalyStatus::from($data['decision']);
         $anomaly->processed_by = $request->user()->id;
         $anomaly->processed_at = now();
         $anomaly->save();
 
-        ActivityLog::record('anomaly.processed', $anomaly, ['status' => AnomalyStatus::ToProcess->value], ['status' => $data['decision']]);
+        ActivityLog::record(
+            'anomaly.processed',
+            $anomaly,
+            ['status' => AnomalyStatus::ToProcess->value],
+            ['status' => $data['decision']],
+        );
 
         return back();
     }

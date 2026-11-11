@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\RestDayStatus;
 use App\Enums\Role;
+use App\Models\Holiday;
 use App\Models\RestDay;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -35,26 +36,62 @@ class RestDayController extends Controller
             $query->whereMonth('date', $request->month);
         }
 
-        $restDays = $query->orderBy('date', 'desc')->get();
+        $restDays = $query->orderBy('date', 'desc')->get()->each(function ($item) use ($user) {
+            $item->setAttribute('can', [
+                'approve' => $user->can('approve', $item),
+                'cancel' => $user->can('update', $item),
+            ]);
+        });
+
+        $statsBase = RestDay::query();
+        if (! $user->can('viewAny', RestDay::class)) {
+            $statsBase->where('user_id', $user->id);
+        } elseif ($user->hasRole(Role::Manager)) {
+            $statsBase->whereHas('user', function ($q) use ($user) {
+                $q->where('service_id', $user->service_id)
+                    ->orWhere('manager_id', $user->id);
+            });
+        }
 
         $stats = [
-            'total' => $restDays->count(),
-            'pending' => $restDays->where('status', RestDayStatus::Pending)->count(),
-            'approved' => $restDays->where('status', RestDayStatus::Approved)->count(),
-            'rejected' => $restDays->where('status', RestDayStatus::Rejected)->count(),
+            'total'    => (clone $statsBase)->count(),
+            'pending'  => (clone $statsBase)->where('status', RestDayStatus::Pending)->count(),
+            'approved' => (clone $statsBase)->where('status', RestDayStatus::Approved)->count(),
+            'rejected' => (clone $statsBase)->where('status', RestDayStatus::Rejected)->count(),
         ];
 
+        // For employees: expose quota info and admissibility data
+        $quotaInfo = null;
+        if ($user->rest_quota > 0 || $user->hasRole(Role::Employee)) {
+            $now = Carbon::now();
+            $approvedThisMonth = RestDay::where('user_id', $user->id)
+                ->where('status', RestDayStatus::Approved)
+                ->whereMonth('date', $now->month)
+                ->whereYear('date', $now->year)
+                ->count();
+
+            $pendingThisMonth = RestDay::where('user_id', $user->id)
+                ->where('status', RestDayStatus::Pending)
+                ->whereMonth('date', $now->month)
+                ->whereYear('date', $now->year)
+                ->count();
+
+            $quotaInfo = [
+                'quota'              => $user->rest_quota,
+                'approved_this_month' => $approvedThisMonth,
+                'pending_this_month'  => $pendingThisMonth,
+                'remaining'          => max(0, $user->rest_quota - $approvedThisMonth),
+                'can_propose'        => ($approvedThisMonth + $pendingThisMonth) < $user->rest_quota,
+            ];
+        }
+
         return Inertia::render('rest-days/index', [
-            'restDays' => $restDays,
-            'stats' => $stats,
+            'restDays'  => $restDays,
+            'stats'     => $stats,
+            'quotaInfo' => $quotaInfo,
+            'filters'   => $request->only('status', 'month'),
+            'canCreate' => $user->can('create', RestDay::class) && $user->rest_quota > 0,
         ]);
-    }
-
-    public function show(RestDay $restDay)
-    {
-        $this->authorize('view', $restDay);
-
-        return $restDay->load(['user', 'decider']);
     }
 
     public function store(Request $request)
@@ -68,37 +105,65 @@ class RestDayController extends Controller
         $user = Auth::user();
 
         if ($user->rest_quota <= 0) {
-            return response()->json(['message' => 'Votre quota de jours de repos est épuisé'], 400);
+            return back()->withErrors(['date' => 'Votre quota de jours de repos est épuisé.']);
         }
 
-        $restDay = RestDay::create([
-            'user_id' => $user->id,
-            'date' => $validated['date'],
-            'status' => RestDayStatus::Pending,
-        ]);
+        $date = Carbon::parse($validated['date']);
+        $now  = Carbon::now();
 
-        return response()->json($restDay, 201);
-    }
+        // Check minimum notice period (3 calendar days per F7.4)
+        $minDate = $now->copy()->addDays(3)->startOfDay();
+        if ($date->lt($minDate)) {
+            return back()->withErrors(['date' => 'Le délai minimum de prévenance est de 3 jours calendaires.']);
+        }
 
-    public function update(Request $request, RestDay $restDay)
-    {
-        $this->authorize('update', $restDay);
+        // Must not be a holiday (F7.4)
+        if (Holiday::where('date', $date->toDateString())->exists()) {
+            return back()->withErrors(['date' => 'Ce jour est un jour férié.']);
+        }
 
-        $validated = $request->validate([
-            'date' => 'sometimes|date|after_or_equal:today',
-        ]);
+        // Must not already be proposed/approved this month quota
+        $approvedCount = RestDay::where('user_id', $user->id)
+            ->where('status', RestDayStatus::Approved)
+            ->whereMonth('date', $date->month)
+            ->whereYear('date', $date->year)
+            ->count();
 
-        $restDay->update($validated);
+        $pendingCount = RestDay::where('user_id', $user->id)
+            ->where('status', RestDayStatus::Pending)
+            ->whereMonth('date', $date->month)
+            ->whereYear('date', $date->year)
+            ->count();
 
-        return response()->json($restDay);
-    }
+        if (($approvedCount + $pendingCount) >= $user->rest_quota) {
+            return back()->withErrors(['date' => 'Vous avez atteint le quota de demandes pour ce mois.']);
+        }
 
-    public function destroy(RestDay $restDay)
-    {
-        $this->authorize('delete', $restDay);
-        $restDay->delete();
+        // Must not be an already-approved or pending rest day on that date
+        if (RestDay::where('user_id', $user->id)
+            ->whereDate('date', $date->toDateString())
+            ->whereIn('status', [RestDayStatus::Pending, RestDayStatus::Approved])
+            ->exists()) {
+            return back()->withErrors(['date' => 'Une demande existe déjà pour cette date.']);
+        }
 
-        return response()->noContent();
+        // Must not have been rejected this month for the same date (F7.4)
+        if (RestDay::where('user_id', $user->id)
+            ->whereDate('date', $date->toDateString())
+            ->where('status', RestDayStatus::Rejected)
+            ->exists()) {
+            return back()->withErrors(['date' => 'Cette date a déjà été refusée ce mois-ci.']);
+        }
+
+        $restDay = new RestDay(['date' => $date->toDateString()]);
+        $restDay->user_id = $user->id;
+        $restDay->status  = RestDayStatus::Pending;
+        $restDay->save();
+
+        // Notify the administrator (F7.5)
+        $this->notifyApprovers($user, $restDay);
+
+        return back();
     }
 
     public function approve(Request $request, RestDay $restDay)
@@ -106,18 +171,16 @@ class RestDayController extends Controller
         $this->authorize('approve', $restDay);
 
         if (! $restDay->status->isPending()) {
-            return response()->json(['message' => 'Seules les demandes en attente peuvent être approuvées'], 400);
+            return back()->withErrors(['status' => 'Seules les demandes en attente peuvent être approuvées.']);
         }
 
-        $restDay->update([
-            'status' => RestDayStatus::Approved,
+        $restDay->forceFill([
+            'status'     => RestDayStatus::Approved,
             'decided_by' => Auth::id(),
             'decided_at' => now(),
-        ]);
+        ])->save();
 
-        $restDay->user->decrement('rest_quota');
-
-        return response()->json($restDay->load('user', 'decider'));
+        return back();
     }
 
     public function reject(Request $request, RestDay $restDay)
@@ -129,29 +192,28 @@ class RestDayController extends Controller
         ]);
 
         if (! $restDay->status->isPending()) {
-            return response()->json(['message' => 'Seules les demandes en attente peuvent être refusées'], 400);
+            return back()->withErrors(['status' => 'Seules les demandes en attente peuvent être refusées.']);
         }
 
-        $user = $restDay->user;
-        $admissibleDays = $this->calculateAdmissibleDays($user);
-        $remainingQuota = $user->rest_quota;
+        // F7.17 — block rejection if admissible days <= remaining quota
+        $employee        = $restDay->user;
+        $admissibleDays  = $this->calculateAdmissibleDays($employee, $restDay->date->format('Y-m'));
+        $remainingQuota  = $this->remainingQuota($employee, $restDay->date->format('Y-m'));
 
         if ($admissibleDays <= $remainingQuota) {
-            return response()->json([
-                'message' => 'Refus impossible : les jours admissibles restants sont inférieurs ou égaux au quota restant',
-                'admissible_days' => $admissibleDays,
-                'remaining_quota' => $remainingQuota,
-            ], 400);
+            return back()->withErrors([
+                'justification' => 'Refus impossible : les jours admissibles restants ('.$admissibleDays.') sont inférieurs ou égaux au quota restant ('.$remainingQuota.'). Vous ne pouvez qu\'approuver.',
+            ]);
         }
 
-        $restDay->update([
-            'status' => RestDayStatus::Rejected,
-            'decided_by' => Auth::id(),
-            'decided_at' => now(),
+        $restDay->forceFill([
+            'status'        => RestDayStatus::Rejected,
+            'decided_by'    => Auth::id(),
+            'decided_at'    => now(),
             'justification' => $validated['justification'],
-        ]);
+        ])->save();
 
-        return response()->json($restDay->load('user', 'decider'));
+        return back();
     }
 
     public function cancel(RestDay $restDay)
@@ -159,31 +221,107 @@ class RestDayController extends Controller
         $this->authorize('update', $restDay);
 
         if (! $restDay->status->isPending()) {
-            return response()->json(['message' => 'Seules les demandes en attente peuvent être annulées'], 400);
+            return back()->withErrors(['status' => 'Seules les demandes en attente peuvent être annulées.']);
         }
 
-        $restDay->update(['status' => RestDayStatus::Cancelled]);
+        $restDay->forceFill(['status' => RestDayStatus::Cancelled])->save();
 
-        return response()->json($restDay);
+        return back();
     }
 
-    private function calculateAdmissibleDays(User $user): int
+    // ─────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * Count admissible days remaining in the given year-month for an employee.
+     * Per F7.16: days that are future, past the notice period, not holidays,
+     * not already approved or pending or rejected this month.
+     * Pending proposals count as admissible (F7.16 last sentence).
+     */
+    private function calculateAdmissibleDays(User $user, string $yearMonth): int
     {
-        $currentMonth = Carbon::now()->month;
-        $currentYear = Carbon::now()->year;
+        [$year, $month] = explode('-', $yearMonth);
+        $now = Carbon::now()->startOfDay();
+        $minDate = $now->copy()->addDays(3);
 
-        $approvedThisMonth = RestDay::where('user_id', $user->id)
+        // All days in the month
+        $firstDay = Carbon::create((int) $year, (int) $month, 1);
+        $lastDay  = $firstDay->copy()->endOfMonth();
+
+        // Load holidays and rejected dates for the month
+        $holidayDates = Holiday::whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->pluck('date')
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+            ->toArray();
+
+        $approvedDates = RestDay::where('user_id', $user->id)
             ->where('status', RestDayStatus::Approved)
-            ->whereMonth('date', $currentMonth)
-            ->whereYear('date', $currentYear)
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->pluck('date')
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+            ->toArray();
+
+        $rejectedDates = RestDay::where('user_id', $user->id)
+            ->where('status', RestDayStatus::Rejected)
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->pluck('date')
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+            ->toArray();
+
+        $admissible = 0;
+        $cursor = $firstDay->copy();
+
+        while ($cursor->lte($lastDay)) {
+            $dateStr = $cursor->toDateString();
+
+            if ($cursor->gte($minDate)
+                && ! in_array($dateStr, $holidayDates, true)
+                && ! in_array($dateStr, $approvedDates, true)
+                && ! in_array($dateStr, $rejectedDates, true)
+            ) {
+                $admissible++;
+            }
+
+            $cursor->addDay();
+        }
+
+        return $admissible;
+    }
+
+    /**
+     * Quota remaining = monthly quota - days already approved this month.
+     */
+    private function remainingQuota(User $user, string $yearMonth): int
+    {
+        [$year, $month] = explode('-', $yearMonth);
+
+        $approved = RestDay::where('user_id', $user->id)
+            ->where('status', RestDayStatus::Approved)
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
             ->count();
 
-        $pendingThisMonth = RestDay::where('user_id', $user->id)
-            ->where('status', RestDayStatus::Pending)
-            ->whereMonth('date', $currentMonth)
-            ->whereYear('date', $currentYear)
-            ->count();
+        return max(0, $user->rest_quota - $approved);
+    }
 
-        return $user->rest_quota - $approvedThisMonth - $pendingThisMonth;
+    /**
+     * Notify the administrator (and HR if admin unavailable) of a new rest day proposal.
+     */
+    private function notifyApprovers(User $employee, RestDay $restDay): void
+    {
+        $admin = User::where('role', Role::Administrator->value)->first();
+
+        if ($admin) {
+            $admin->internalNotifications()->create([
+                'type'            => 'rest_day_proposed',
+                'channel'         => 'application',
+                'minimal_content' => "{$employee->name} a proposé le {$restDay->date->format('d/m/Y')} comme jour de repos.",
+                'data'            => ['rest_day_id' => $restDay->id, 'user_id' => $employee->id],
+            ]);
+        }
     }
 }

@@ -1,218 +1,377 @@
-import { Head } from '@inertiajs/react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Head, router, usePage } from '@inertiajs/react';
+import {
+    Bell,
+    BellRing,
+    Check,
+    CheckCircle2,
+    Loader2,
+    MapPin,
+    X,
+} from 'lucide-react';
+import { useCallback, useState } from 'react';
+
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Bell, BellRing, Check, MoreVertical, X } from 'lucide-react';
+import {
+    Card,
+    CardAction,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
 
-interface PresencePing {
+// =========================
+// TYPES
+// =========================
+
+type PingStatus = 'pending' | 'responded' | 'undeliverable';
+type PingResult = 'in_zone' | 'out_of_zone' | 'no_response' | null;
+
+type Ping = {
     id: number;
-    user: {
-        name: string;
-    };
+    user: { id: number; name: string };
     sent_at: string;
+    expires_at: string;
     responded_at: string | null;
-    status: 'pending' | 'responded' | 'undeliverable';
+    result: PingResult;
+    deliverability: string;
+    status: PingStatus;
+    can_respond: boolean;
+};
+
+type Props = {
+    pings: Ping[];
+    stats: { total: number; pending: number; responded: number; undeliverable: number };
+    isAdmin: boolean;
+};
+
+// =========================
+// HELPERS
+// =========================
+
+const fmtDT = (iso: string | null) =>
+    iso
+        ? new Date(iso).toLocaleString('fr-FR', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+              hour: '2-digit', minute: '2-digit',
+          })
+        : '—';
+
+const statusConfig: Record<PingStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+    pending:       { label: 'En attente',   variant: 'secondary' },
+    responded:     { label: 'Répondu',      variant: 'default' },
+    undeliverable: { label: 'Non livrable', variant: 'destructive' },
+};
+
+const resultLabels: Record<string, string> = {
+    in_zone:     '✓ En zone',
+    out_of_zone: '✗ Hors zone',
+    no_response: '— Sans réponse',
+};
+
+const Err = ({ text }: { text?: string }) =>
+    text ? (
+        <Alert variant="destructive" className="mt-2">
+            <AlertDescription>{text}</AlertDescription>
+        </Alert>
+    ) : null;
+
+// =========================
+// GEO HOOK (same as attendance)
+// =========================
+
+type GeoState =
+    | { status: 'idle' }
+    | { status: 'requesting' }
+    | { status: 'ready'; lat: number; lng: number; accuracy: number }
+    | { status: 'error'; message: string };
+
+function useGeolocation() {
+    const [state, setState] = useState<GeoState>({ status: 'idle' });
+
+    const request = useCallback(() => {
+        if (! navigator.geolocation) {
+            setState({ status: 'error', message: 'Géolocalisation non disponible.' });
+            return;
+        }
+        setState({ status: 'requesting' });
+        navigator.geolocation.getCurrentPosition(
+            (pos) => setState({
+                status: 'ready',
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+                accuracy: pos.coords.accuracy,
+            }),
+            (err) => {
+                const m: Record<number, string> = {
+                    1: 'Permission de géolocalisation refusée.',
+                    2: 'Position indisponible.',
+                    3: 'Délai dépassé. Réessayez.',
+                };
+                setState({ status: 'error', message: m[err.code] ?? 'Erreur GPS.' });
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+        );
+    }, []);
+
+    return { state, request };
 }
 
-interface PageProps {
-    pings: PresencePing[];
-    stats: {
-        total: number;
-        pending: number;
-        responded: number;
-        undeliverable: number;
-    };
-}
+// =========================
+// PING RESPONSE WIDGET
+// =========================
 
-export default function PingsIndex({ pings, stats }: PageProps) {
-    const getStatusBadge = (status: string) => {
-        const variants = {
-            pending: 'secondary',
-            responded: 'default',
-            undeliverable: 'destructive',
-        } as const;
+function RespondWidget({ ping }: { ping: Ping }) {
+    const page = usePage<{ errors: Record<string, string> }>();
+    const { errors } = page.props;
+    const { state: geo, request: requestGeo } = useGeolocation();
+    const [busy, setBusy] = useState(false);
 
-        const icons = {
-            pending: <BellRing className="size-3.5" />,
-            responded: <Check className="size-3.5" />,
-            undeliverable: <X className="size-3.5" />,
-        };
+    const expiresAt = new Date(ping.expires_at);
+    const isExpired = expiresAt < new Date();
 
-        const labels = {
-            pending: 'En attente',
-            responded: 'Répondu',
-            undeliverable: 'Non livrable',
-        };
-
+    if (isExpired) {
         return (
-            <Badge variant={variants[status as keyof typeof variants] || 'outline'} className="gap-1.5">
-                {icons[status as keyof typeof icons]}
-                {labels[status as keyof typeof labels]}
-            </Badge>
+            <p className="text-sm text-muted-foreground italic">
+                Ce ping a expiré à {fmtDT(ping.expires_at)}.
+            </p>
+        );
+    }
+
+    const handleRespond = () => {
+        if (geo.status !== 'ready') {
+            requestGeo();
+            return;
+        }
+        setBusy(true);
+        router.post(
+            `/pings/${ping.id}/respond`,
+            { latitude: geo.lat, longitude: geo.lng, accuracy: geo.accuracy },
+            { preserveScroll: true, onFinish: () => setBusy(false) },
         );
     };
 
-    const formatDateTime = (date: string | null) => {
-        if (!date) return '-';
-        return new Date(date).toLocaleString('fr-FR', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
+    return (
+        <div className="flex flex-col gap-2">
+            {geo.status === 'error' && <Err text={geo.message} />}
+            {errors.ping && <Err text={errors.ping} />}
+
+            {geo.status === 'requesting' && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" /> Lecture de la position…
+                </div>
+            )}
+            {geo.status === 'ready' && (
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                    <CheckCircle2 className="size-4" />
+                    Position prête (±{Math.round(geo.accuracy)} m)
+                </div>
+            )}
+
+            <Button onClick={handleRespond} disabled={busy || geo.status === 'requesting'}>
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+                Confirmer ma présence
+            </Button>
+        </div>
+    );
+}
+
+// =========================
+// PAGE
+// =========================
+
+export default function Index({ pings, stats, isAdmin }: Props) {
+    const page = usePage<{ errors: Record<string, string> }>();
+    const { errors } = page.props;
+
+    const [responding, setResponding] = useState<Ping | null>(null);
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+
+    const cards = [
+        { label: 'Total',        value: stats.total,         icon: <Bell className="size-5" /> },
+        { label: 'En attente',   value: stats.pending,       icon: <BellRing className="size-5" /> },
+        { label: 'Répondus',     value: stats.responded,     icon: <Check className="size-5" /> },
+        { label: 'Non livrables', value: stats.undeliverable, icon: <X className="size-5" /> },
+    ];
+
+    const filtered = statusFilter === 'all'
+        ? pings
+        : pings.filter((p) => p.status === statusFilter);
 
     return (
         <>
             <Head title="Pings de présence" />
-            <div className="flex h-full flex-1 flex-col gap-6 p-4 lg:p-6">
-                {/* Stats Cards */}
-                <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-muted-foreground">Total</p>
-                                    <p className="text-2xl font-bold">{stats.total}</p>
-                                </div>
-                                <div className="bg-secondary rounded-lg p-3">
-                                    <Bell className="size-6" />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+            <div className="flex flex-col gap-6 p-4 lg:p-6">
 
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-muted-foreground">En attente</p>
-                                    <p className="text-2xl font-bold">{stats.pending}</p>
-                                </div>
-                                <div className="bg-secondary rounded-lg p-3">
-                                    <BellRing className="size-6 text-warning" />
-                                </div>
+                {/* Ping en attente pour l'employé courant */}
+                {pings.some((p) => p.can_respond) && (
+                    <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20">
+                        <CardContent className="flex flex-wrap items-center gap-4 py-4">
+                            <BellRing className="size-8 shrink-0 text-orange-500 animate-pulse" />
+                            <div className="flex-1">
+                                <p className="font-semibold">Vérification de présence en cours</p>
+                                <p className="text-sm text-muted-foreground">
+                                    Confirmez votre présence dans la zone de travail avant l'expiration.
+                                </p>
                             </div>
+                            {pings.filter((p) => p.can_respond).map((p) => (
+                                <Button key={p.id} onClick={() => setResponding(p)}>
+                                    <MapPin className="size-4" /> Répondre
+                                </Button>
+                            ))}
                         </CardContent>
                     </Card>
+                )}
 
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-muted-foreground">Répondu</p>
-                                    <p className="text-2xl font-bold">{stats.responded}</p>
-                                </div>
-                                <div className="bg-secondary rounded-lg p-3">
-                                    <Check className="size-6 text-success" />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardContent className="pt-6">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-muted-foreground">Non livrable</p>
-                                    <p className="text-2xl font-bold">{stats.undeliverable}</p>
-                                </div>
-                                <div className="bg-secondary rounded-lg p-3">
-                                    <X className="size-6 text-destructive" />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+                {/* Stats */}
+                <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {cards.map((c) => (
+                        <Card key={c.label}>
+                            <CardHeader>
+                                <CardDescription>{c.label}</CardDescription>
+                                <CardTitle className="text-3xl font-semibold tabular-nums">
+                                    {c.value}
+                                </CardTitle>
+                            </CardHeader>
+                        </Card>
+                    ))}
                 </div>
 
-                {/* Data Table */}
+                {/* Table */}
                 <Card>
                     <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle>Pings de présence</CardTitle>
-                                <CardDescription>
-                                    Suivez les notifications de présence envoyées aux employés
-                                </CardDescription>
-                            </div>
-                            <Button>
-                                <BellRing className="size-4 mr-2" />
-                                Envoyer un ping
-                            </Button>
-                        </div>
+                        <CardTitle>Pings de présence</CardTitle>
+                        <CardDescription>Vérifications ponctuelles envoyées aux employés</CardDescription>
+                        <CardAction className="flex flex-wrap gap-2">
+                            <Select
+                                value={statusFilter}
+                                onValueChange={setStatusFilter}
+                            >
+                                <SelectTrigger size="sm" className="w-40">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tous</SelectItem>
+                                    <SelectItem value="pending">En attente</SelectItem>
+                                    <SelectItem value="responded">Répondus</SelectItem>
+                                    <SelectItem value="undeliverable">Non livrables</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </CardAction>
                     </CardHeader>
                     <CardContent>
-                        <div className="rounded-md border">
+                        <Err text={errors.ping} />
+                        <div className="overflow-x-auto">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Employé</TableHead>
-                                        <TableHead>Envoyé le</TableHead>
-                                        <TableHead>Répondu le</TableHead>
+                                        <TableHead>Envoyé</TableHead>
+                                        <TableHead>Expire</TableHead>
+                                        <TableHead>Répondu</TableHead>
+                                        <TableHead>Résultat</TableHead>
                                         <TableHead>Statut</TableHead>
-                                        <TableHead className="text-right">Actions</TableHead>
+                                        <TableHead />
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {pings.length === 0 ? (
+                                    {filtered.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                                                Aucun ping de présence trouvé
+                                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                                                Aucun ping
                                             </TableCell>
                                         </TableRow>
-                                    ) : (
-                                        pings.map((ping) => (
-                                            <TableRow key={ping.id}>
-                                                <TableCell className="font-medium">{ping.user.name}</TableCell>
-                                                <TableCell>{formatDateTime(ping.sent_at)}</TableCell>
-                                                <TableCell>{formatDateTime(ping.responded_at)}</TableCell>
-                                                <TableCell>{getStatusBadge(ping.status)}</TableCell>
-                                                <TableCell className="text-right">
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button variant="ghost" size="icon">
-                                                                <MoreVertical className="size-4" />
-                                                                <span className="sr-only">Ouvrir le menu</span>
-                                                            </Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end">
-                                                            {ping.status === 'pending' && (
-                                                                <DropdownMenuItem>
-                                                                    <Check className="size-4 mr-2 text-success" />
-                                                                    Marquer comme répondu
-                                                                </DropdownMenuItem>
-                                                            )}
-                                                            {ping.status === 'pending' && (
-                                                                <DropdownMenuItem>
-                                                                    <X className="size-4 mr-2 text-destructive" />
-                                                                    Marquer non livrable
-                                                                </DropdownMenuItem>
-                                                            )}
-                                                            <DropdownMenuItem>Voir les détails</DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
                                     )}
+                                    {filtered.map((p) => (
+                                        <TableRow key={p.id}>
+                                            <TableCell className="font-medium">{p.user.name}</TableCell>
+                                            <TableCell className="whitespace-nowrap">{fmtDT(p.sent_at)}</TableCell>
+                                            <TableCell className="whitespace-nowrap text-muted-foreground">
+                                                {fmtDT(p.expires_at)}
+                                            </TableCell>
+                                            <TableCell className="whitespace-nowrap">
+                                                {fmtDT(p.responded_at)}
+                                            </TableCell>
+                                            <TableCell>
+                                                {p.result ? (
+                                                    <span className={
+                                                        p.result === 'in_zone'
+                                                            ? 'text-green-600 text-sm'
+                                                            : 'text-destructive text-sm'
+                                                    }>
+                                                        {resultLabels[p.result] ?? p.result}
+                                                    </span>
+                                                ) : '—'}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant={statusConfig[p.status].variant}>
+                                                    {statusConfig[p.status].label}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                {p.can_respond && (
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => setResponding(p)}
+                                                    >
+                                                        Répondre
+                                                    </Button>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
                                 </TableBody>
                             </Table>
                         </div>
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Dialog de réponse */}
+            <Dialog
+                open={responding !== null}
+                onOpenChange={(open) => !open && setResponding(null)}
+            >
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Confirmer votre présence</DialogTitle>
+                    </DialogHeader>
+                    {responding && <RespondWidget ping={responding} />}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setResponding(null)}>
+                            Fermer
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }
 
-PingsIndex.layout = {
-    breadcrumbs: [
-        {
-            title: 'Pings de présence',
-            href: '/pings',
-        },
-    ],
+Index.layout = {
+    breadcrumbs: [{ title: 'Pings de présence', href: '/pings' }],
 };

@@ -1,5 +1,5 @@
 import { Head, router, useForm, usePage } from '@inertiajs/react';
-import { Check, FileText, Plus, X } from 'lucide-react';
+import { Check, ExternalLink, FileText, Plus, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +34,7 @@ type LeaveRequest = {
     reason: string | null;
     comment: string | null;
     status: Status;
+    supporting_document: string | null;
     user: { id: number; name: string };
     type: { id: number; label: string };
     approver: { name: string } | null;
@@ -91,6 +92,7 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
     const isNew = page.url.includes('new=1');
 
     const [creating, setCreating] = useState(false);
+    const [viewing, setViewing] = useState<LeaveRequest | null>(null);
     const [rejecting, setRejecting] = useState<LeaveRequest | null>(null);
     const [comment, setComment] = useState('');
     const [hourlyDate, setHourlyDate] = useState('');
@@ -208,49 +210,33 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
     };
 
     const submit = () => {
-        if (validationError) {
-            return;
-        }
+        if (validationError) return;
+        if (!isFormValid()) return;
 
-        // Validate required fields
-        if (!form.data.type_id) {
-            form.setError('type_id', 'Le type est requis.');
-            return;
-        }
+        form.transform((data) => {
+            const transformed = isHourly
+                ? { ...data, start: `${hourlyDate} ${startTime}:00`, end: `${hourlyDate} ${endTime}:00` }
+                : { ...data, start: `${data.start} 00:00:00`, end: `${data.end} 23:59:59` };
 
-        if (!form.data.reason) {
-            form.setError('reason', 'Le motif est requis.');
-            return;
-        }
-
-        if (isHourly) {
-            if (!hourlyDate || !startTime || !endTime) {
-                form.setError('start', 'La date et les heures sont requises.');
-                return;
+            // Remove null file to avoid sending "null" string in FormData
+            if (!transformed.supporting_document) {
+                const { supporting_document, ...rest } = transformed;
+                return rest;
             }
-        } else {
-            if (!form.data.start || !form.data.end) {
-                form.setError('start', 'Les dates sont requises.');
-                return;
-            }
-        }
 
-        form
-            .transform((data) =>
-                isHourly
-                    ? { ...data, start: `${hourlyDate} ${startTime}`, end: `${hourlyDate} ${endTime}` }
-                    : { ...data, start: `${data.start} 00:00:00`, end: `${data.end} 23:59:59` },
-            )
-            .post('/leave-requests', {
-                forceFormData: true,
-                onSuccess: () => {
-                    form.reset();
-                    setHourlyDate('');
-                    setStartTime('');
-                    setEndTime('');
-                    toggleCreate(false);
-                },
-            });
+            return transformed;
+        });
+
+        form.post('/leave-requests', {
+            forceFormData: true,
+            onSuccess: () => {
+                form.reset();
+                setHourlyDate('');
+                setStartTime('');
+                setEndTime('');
+                toggleCreate(false);
+            },
+        });
     };
 
     const approve = (id: number) => router.patch(`/leave-requests/${id}/approve`, {}, { preserveScroll: true });
@@ -267,6 +253,7 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                 preserveScroll: true,
                 onSuccess: () => {
                     setRejecting(null);
+                    setViewing(null);
                     setComment('');
                 },
             },
@@ -353,7 +340,7 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                                         </TableRow>
                                     )}
                                     {leaveRequests.map((item) => (
-                                        <TableRow key={item.id}>
+                                        <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewing(item)}>
                                             <TableCell className="font-medium">{item.user.name}</TableCell>
                                             <TableCell>{item.type.label}</TableCell>
                                             <TableCell className="whitespace-nowrap">
@@ -365,7 +352,7 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                                             </TableCell>
                                             <TableCell className="text-muted-foreground">{item.approver?.name ?? '—'}</TableCell>
                                             <TableCell>
-                                                <div className="flex justify-end gap-2">
+                                                <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                                     {item.status === 'pending' && item.can.approve && (
                                                         <>
                                                             <Button size="sm" variant="outline" onClick={() => approve(item.id)}>
@@ -528,6 +515,113 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                         <Button onClick={submit} disabled={form.processing || !isFormValid()}>
                             Envoyer
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog de détail d'une demande */}
+            <Dialog open={viewing !== null} onOpenChange={(open) => !open && setViewing(null)}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Détail de la demande</DialogTitle>
+                    </DialogHeader>
+                    {viewing && (
+                        <div className="grid gap-4 text-sm">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Demandeur</p>
+                                    <p className="mt-0.5">{viewing.user.name}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Type</p>
+                                    <p className="mt-0.5">{viewing.type.label}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Début</p>
+                                    <p className="mt-0.5">{formatDate(viewing.start)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Fin</p>
+                                    <p className="mt-0.5">{formatDate(viewing.end)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Statut</p>
+                                    <div className="mt-0.5">
+                                        <Badge variant={statuses[viewing.status].variant}>
+                                            {statuses[viewing.status].label}
+                                        </Badge>
+                                    </div>
+                                </div>
+                                {viewing.approver && (
+                                    <div>
+                                        <p className="text-xs font-medium text-muted-foreground">Validateur</p>
+                                        <p className="mt-0.5">{viewing.approver.name}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {viewing.reason && (
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Motif</p>
+                                    <p className="mt-1 rounded-md bg-muted px-3 py-2 leading-relaxed">{viewing.reason}</p>
+                                </div>
+                            )}
+
+                            {viewing.comment && (
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">
+                                        {viewing.status === 'rejected' ? 'Motif du refus' : 'Commentaire'}
+                                    </p>
+                                    <p className="mt-1 rounded-md bg-muted px-3 py-2 leading-relaxed">{viewing.comment}</p>
+                                </div>
+                            )}
+
+                            {viewing.supporting_document && (
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground">Justificatif</p>
+                                    <a
+                                        href={`/storage/${viewing.supporting_document}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-1 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 transition-colors hover:bg-muted"
+                                    >
+                                        <FileText className="size-4 shrink-0 text-muted-foreground" />
+                                        <span className="flex-1 truncate">
+                                            {viewing.supporting_document.split('/').pop()}
+                                        </span>
+                                        <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                                    </a>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    <DialogFooter className="flex-row flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => setViewing(null)} className="mr-auto">
+                            Fermer
+                        </Button>
+                        {viewing?.can.cancel && (
+                            <Button
+                                variant="ghost"
+                                onClick={() => { cancel(viewing.id); setViewing(null); }}
+                            >
+                                Annuler
+                            </Button>
+                        )}
+                        {viewing?.status === 'pending' && viewing.can.approve && (
+                            <>
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => { setRejecting(viewing); setViewing(null); }}
+                                >
+                                    <X /> Refuser
+                                </Button>
+                                <Button
+                                    onClick={() => { approve(viewing.id); setViewing(null); }}
+                                >
+                                    <Check /> Approuver
+                                </Button>
+                            </>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

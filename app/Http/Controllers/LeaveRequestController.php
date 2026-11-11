@@ -85,9 +85,9 @@ class LeaveRequestController extends Controller
         $validated = $request->validate([
             'type_id' => 'required|exists:leave_types,id',
             'start' => 'required|date|after:now',
-            'end' => 'required|date|after:start',
-            'reason' => 'string|max:1000',
-            'supporting_document' => 'nullable|file|max:10240',
+            'end' => 'required|date|after_or_equal:start',
+            'reason' => 'nullable|string|max:1000',
+            'supporting_document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
         $type = LeaveType::findOrFail($validated['type_id']);

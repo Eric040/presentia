@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AnomalyStatus;
 use App\Enums\AttendanceStatus;
 use App\Enums\RestDayStatus;
 use App\Enums\Role;
 use App\Enums\TimeLogFlag;
 use App\Enums\TimeLogType;
+use App\Models\Anomaly;
 use App\Models\AttendanceSession;
 use App\Models\Holiday;
 use App\Models\LeaveRequest;
@@ -21,6 +23,12 @@ use Inertia\Inertia;
 
 class AttendanceController extends Controller
 {
+    // Tolérance de retard par défaut (minutes) - F3.9
+    private const LATE_TOLERANCE_MIN = 10;
+
+    // Seuil d'absence par défaut (heures) - F3.10
+    private const ABSENCE_THRESHOLD_HOURS = 2;
+
     public function index(Request $request)
     {
         $user = Auth::user();
@@ -36,80 +44,196 @@ class AttendanceController extends Controller
         }
 
         if ($request->filled('date_from')) {
-            $query->where('date', '>=', $request->date_from);
+            $query->whereDate('date', '>=', $request->date_from);
         }
 
         if ($request->filled('date_to')) {
-            $query->where('date', '<=', $request->date_to);
+            $query->whereDate('date', '<=', $request->date_to);
         }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        $sessions = $query->orderBy('date', 'desc')->get();
+        $sessions = $query->orderBy('date', 'desc')->orderBy('id', 'desc')->get();
 
         $stats = [
-            'active' => $sessions->where('status', AttendanceStatus::InProgress)->count(),
+            'active'    => $sessions->where('status', AttendanceStatus::InProgress)->count(),
             'completed' => $sessions->where('status', AttendanceStatus::Complete)->count(),
-            'on_break' => $sessions->filter(function ($session) {
-                $lastLog = $session->timeLogs->last();
-                return $lastLog && $lastLog->type === TimeLogType::BreakStart;
+            'on_break'  => $sessions->filter(function ($s) {
+                $last = $s->timeLogs->sortBy('id')->last();
+                return $last && $last->type === TimeLogType::BreakStart;
             })->count(),
         ];
 
+        // Session du jour pour l'employé courant (si non-admin)
+        $todaySession = null;
+        if (! $user->hasRole(Role::Administrator, Role::Hr)) {
+            $raw = AttendanceSession::with('timeLogs')
+                ->where('user_id', $user->id)
+                ->whereDate('date', Carbon::today())
+                ->first();
+
+            if ($raw) {
+                $lastLog = $raw->timeLogs->sortBy('id')->last();
+                $onBreak    = $lastLog && $lastLog->type === TimeLogType::BreakStart;
+                $hasArrived = ! is_null($raw->arrival);
+                $hasDeparted = ! is_null($raw->departure);
+
+                // Determine next available action label
+                $nextAction = match (true) {
+                    $hasDeparted            => 'done',       // session complete
+                    $onBreak                => 'break_end',  // end break
+                    $hasArrived && ! $onBreak => 'break_start_or_clock_out', // can break or clock out
+                    default                 => 'clock_in',   // nothing done yet today
+                };
+
+                $todaySession = [
+                    'id'           => $raw->id,
+                    'arrival'      => $raw->arrival?->toIso8601String(),
+                    'departure'    => $raw->departure?->toIso8601String(),
+                    'status'       => $raw->status->value,
+                    'late_minutes' => $raw->late_minutes,
+                    'on_break'     => $onBreak,
+                    'has_arrived'  => $hasArrived,
+                    'has_departed' => $hasDeparted,
+                    'next_action'  => $nextAction,
+                ];
+            }
+        }
+
+        // Serialise les sessions pour le frontend
+        $serialized = $sessions->map(function ($s) {
+            $lastLog = $s->timeLogs->sortBy('id')->last();
+            $derivedStatus = match (true) {
+                ! is_null($s->departure) => $s->status->value, // complete or incomplete
+                $lastLog && $lastLog->type === TimeLogType::BreakStart => 'on_break',
+                ! is_null($s->arrival)   => 'in_progress',
+                default                  => $s->status->value,
+            };
+            return [
+                'id'           => $s->id,
+                'user'         => ['id' => $s->user->id, 'name' => $s->user->name],
+                'date'         => $s->date->toDateString(),
+                'arrival'      => $s->arrival?->toIso8601String(),
+                'departure'    => $s->departure?->toIso8601String(),
+                'status'       => $derivedStatus,
+                'late_minutes' => $s->late_minutes,
+                'time_logs'    => $s->timeLogs->map(fn ($tl) => [
+                    'id'               => $tl->id,
+                    'type'             => $tl->type->value,
+                    'timestamp'        => $tl->timestamp->toIso8601String(),
+                    'in_zone'          => $tl->in_zone,
+                    'approx_distance'  => $tl->approx_distance,
+                    'flag'             => $tl->flag?->value,
+                    'flag_label'       => $tl->flag?->label(),
+                ])->values(),
+            ];
+        });
+
         return Inertia::render('attendance/index', [
-            'sessions' => $sessions,
-            'stats' => $stats,
+            'sessions'     => $serialized,
+            'stats'        => $stats,
+            'todaySession' => $todaySession,
+            'filters'      => $request->only('date_from', 'date_to', 'status'),
+            'canClockIn'   => ! $user->hasRole(Role::Administrator, Role::Hr),
+            'schedule'     => $user->hasRole(Role::Administrator, Role::Hr)
+                ? null
+                : ($this->getUserSchedule($user) ? [
+                    'start_time' => substr($this->getUserSchedule($user)->start_time, 0, 5),
+                ] : null),
         ]);
     }
 
-    public function show(AttendanceSession $session)
+    public function show(AttendanceSession $attendanceSession)
     {
-        $this->authorize('view', $session);
+        $this->authorize('view', $attendanceSession);
 
-        return $session->load(['user', 'timeLogs']);
+        $attendanceSession->load(['user', 'timeLogs']);
+
+        return Inertia::render('attendance/show', [
+            'session' => [
+                'id'           => $attendanceSession->id,
+                'user'         => ['id' => $attendanceSession->user->id, 'name' => $attendanceSession->user->name],
+                'date'         => $attendanceSession->date->toDateString(),
+                'arrival'      => $attendanceSession->arrival?->toIso8601String(),
+                'departure'    => $attendanceSession->departure?->toIso8601String(),
+                'status'       => $attendanceSession->status->value,
+                'late_minutes' => $attendanceSession->late_minutes,
+                'time_logs'    => $attendanceSession->timeLogs->map(fn ($tl) => [
+                    'id'               => $tl->id,
+                    'type'             => $tl->type->value,
+                    'type_label'       => $tl->type->label ?? $tl->type->value,
+                    'timestamp'        => $tl->timestamp->toIso8601String(),
+                    'in_zone'          => $tl->in_zone,
+                    'approx_distance'  => $tl->approx_distance,
+                    'flag'             => $tl->flag?->value,
+                    'flag_label'       => $tl->flag?->label(),
+                ])->values(),
+            ],
+        ]);
     }
+
+    // ─────────────────────────────────────────────────────────
+    // Clock actions (all return Inertia back())
+    // ─────────────────────────────────────────────────────────
 
     public function clockIn(Request $request)
     {
-        $user = Auth::user();
+        $user  = Auth::user();
         $today = Carbon::today();
 
-        $session = AttendanceSession::firstOrCreate(
-            ['user_id' => $user->id, 'date' => $today],
-            ['status' => AttendanceStatus::InProgress]
-        );
+        $session = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
+
+        if (! $session) {
+            $session          = new AttendanceSession(['date' => $today, 'status' => AttendanceStatus::InProgress]);
+            $session->user_id = $user->id;
+            $session->save();
+        }
 
         if ($session->arrival && ! $session->departure) {
-            return response()->json(['message' => 'Vous avez déjà pointé votre arrivée aujourd\'hui'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Vous avez déjà pointé votre arrivée aujourd\'hui.']);
         }
 
         if ($session->departure) {
-            return response()->json(['message' => 'Session déjà terminée pour aujourd\'hui'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Session déjà terminée pour aujourd\'hui.']);
         }
 
         $validated = $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'accuracy' => 'required|numeric|min:0',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
         ]);
 
-        $workZone = $this->getUserWorkZone($user);
-        $inZone = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        if ($validated['accuracy'] > 100) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Position trop imprécise. Réessayez ou régularisez.']);
+        }
+
+        $workZone       = $this->getUserWorkZone($user);
+        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
         $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
         $approxAccuracy = min((int) round($validated['accuracy']), 100);
 
-        $flag = $this->determineFlag($user, $today, $inZone);
+        if (! $inZone && ! $this->hasAuthorizedOffsite($user, now())) {
+            return redirect()->route('attendance.index')->withErrors([
+                'clock' => 'Vous êtes hors de la zone de travail ('
+                    . ($approxDistance !== null ? $approxDistance . ' m du site' : 'zone inconnue')
+                    . '). Pointage refusé. Vous pouvez régulariser.',
+            ]);
+        }
 
+        $flag    = $this->determineFlag($user, $today, $inZone);
         $timeLog = TimeLog::create([
-            'session_id' => $session->id,
-            'type' => TimeLogType::Arrival,
-            'timestamp' => now(),
-            'in_zone' => $inZone,
+            'session_id'      => $session->id,
+            'type'            => TimeLogType::Arrival,
+            'timestamp'       => now(),
+            'in_zone'         => $inZone,
             'approx_distance' => $approxDistance,
             'approx_accuracy' => $approxAccuracy,
-            'flag' => $flag,
+            'flag'            => $flag,
         ]);
 
         $session->update(['arrival' => $timeLog->timestamp]);
@@ -119,136 +243,167 @@ class AttendanceController extends Controller
             $session->update(['late_minutes' => $lateMinutes]);
         }
 
-        return response()->json($session->load('timeLogs'));
+        return redirect()->route('attendance.index');
     }
 
     public function clockOut(Request $request)
     {
-        $user = Auth::user();
-        $today = Carbon::today();
-
-        $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
+        $user    = Auth::user();
+        $today   = Carbon::today();
+        $session = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
 
         if (! $session || ! $session->arrival) {
-            return response()->json(['message' => 'Aucune session en cours pour aujourd\'hui'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune session en cours pour aujourd\'hui.']);
         }
 
         if ($session->departure) {
-            return response()->json(['message' => 'Vous avez déjà pointé votre départ aujourd\'hui'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Vous avez déjà pointé votre départ.']);
         }
 
         $validated = $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'accuracy' => 'required|numeric|min:0',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
         ]);
 
-        $workZone = $this->getUserWorkZone($user);
-        $inZone = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        if ($validated['accuracy'] > 100) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Position trop imprécise. Réessayez ou régularisez.']);
+        }
+
+        $workZone       = $this->getUserWorkZone($user);
+        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
         $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
         $approxAccuracy = min((int) round($validated['accuracy']), 100);
 
-        $flag = $this->determineFlag($user, $today, $inZone);
+        if (! $inZone && ! $this->hasAuthorizedOffsite($user, now())) {
+            return redirect()->route('attendance.index')->withErrors([
+                'clock' => 'Vous êtes hors de la zone de travail ('
+                    . ($approxDistance !== null ? $approxDistance . ' m du site' : 'zone inconnue')
+                    . '). Départ refusé. Vous pouvez régulariser.',
+            ]);
+        }
 
+        $flag    = $this->determineFlag($user, $today, $inZone);
         $timeLog = TimeLog::create([
-            'session_id' => $session->id,
-            'type' => TimeLogType::Departure,
-            'timestamp' => now(),
-            'in_zone' => $inZone,
+            'session_id'      => $session->id,
+            'type'            => TimeLogType::Departure,
+            'timestamp'       => now(),
+            'in_zone'         => $inZone,
             'approx_distance' => $approxDistance,
             'approx_accuracy' => $approxAccuracy,
-            'flag' => $flag,
+            'flag'            => $flag,
         ]);
 
         $session->update([
             'departure' => $timeLog->timestamp,
-            'status' => $this->determineSessionStatus($session),
+            'status'    => $this->determineSessionStatus($session),
         ]);
 
-        return response()->json($session->load('timeLogs'));
+        return redirect()->route('attendance.index');
     }
 
     public function startBreak(Request $request)
     {
-        $user = Auth::user();
-        $today = Carbon::today();
-
-        $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
+        $user    = Auth::user();
+        $today   = Carbon::today();
+        $session = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
 
         if (! $session || ! $session->arrival) {
-            return response()->json(['message' => 'Aucune session en cours'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune session en cours.']);
         }
 
-        $lastLog = $session->timeLogs()->latest()->first();
+        $lastLog = $session->timeLogs()->latest('timestamp')->first();
         if ($lastLog && $lastLog->type === TimeLogType::BreakStart) {
-            return response()->json(['message' => 'Pause déjà en cours'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Pause déjà en cours.']);
         }
 
         $validated = $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'accuracy' => 'required|numeric|min:0',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
         ]);
 
-        $workZone = $this->getUserWorkZone($user);
-        $inZone = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        $workZone       = $this->getUserWorkZone($user);
+        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
         $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
         $approxAccuracy = min((int) round($validated['accuracy']), 100);
 
         TimeLog::create([
-            'session_id' => $session->id,
-            'type' => TimeLogType::BreakStart,
-            'timestamp' => now(),
-            'in_zone' => $inZone,
+            'session_id'      => $session->id,
+            'type'            => TimeLogType::BreakStart,
+            'timestamp'       => now(),
+            'in_zone'         => $inZone,
             'approx_distance' => $approxDistance,
             'approx_accuracy' => $approxAccuracy,
         ]);
 
-        return response()->json($session->load('timeLogs'));
+        return redirect()->route('attendance.index');
     }
 
     public function endBreak(Request $request)
     {
-        $user = Auth::user();
-        $today = Carbon::today();
-
-        $session = AttendanceSession::where('user_id', $user->id)->where('date', $today)->first();
+        $user    = Auth::user();
+        $today   = Carbon::today();
+        $session = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
 
         if (! $session || ! $session->arrival) {
-            return response()->json(['message' => 'Aucune session en cours'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune session en cours.']);
         }
 
-        $lastLog = $session->timeLogs()->latest()->first();
+        $lastLog = $session->timeLogs()->latest('timestamp')->first();
         if (! $lastLog || $lastLog->type !== TimeLogType::BreakStart) {
-            return response()->json(['message' => 'Aucune pause en cours'], 400);
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune pause en cours.']);
         }
 
         $validated = $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'accuracy' => 'required|numeric|min:0',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
         ]);
 
-        $workZone = $this->getUserWorkZone($user);
-        $inZone = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        $workZone       = $this->getUserWorkZone($user);
+        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
         $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
         $approxAccuracy = min((int) round($validated['accuracy']), 100);
 
         TimeLog::create([
-            'session_id' => $session->id,
-            'type' => TimeLogType::BreakEnd,
-            'timestamp' => now(),
-            'in_zone' => $inZone,
+            'session_id'      => $session->id,
+            'type'            => TimeLogType::BreakEnd,
+            'timestamp'       => now(),
+            'in_zone'         => $inZone,
             'approx_distance' => $approxDistance,
             'approx_accuracy' => $approxAccuracy,
         ]);
 
-        return response()->json($session->load('timeLogs'));
+        return redirect()->route('attendance.index');
     }
+
+    // ─────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────
 
     private function getUserWorkZone($user): ?WorkZone
     {
         return $user->workZones()->where('active', true)->first();
+    }
+
+    /** Haversine distance in metres */
+    private function distanceTo(float $lat, float $lng, WorkZone $zone): float
+    {
+        $R   = 6371000;
+        $φ1  = deg2rad($lat);
+        $φ2  = deg2rad($zone->latitude);
+        $Δφ  = deg2rad($zone->latitude - $lat);
+        $Δλ  = deg2rad($zone->longitude - $lng);
+        $a   = sin($Δφ / 2) ** 2 + cos($φ1) * cos($φ2) * sin($Δλ / 2) ** 2;
+        return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 
     private function isInZone(float $lat, float $lng, ?WorkZone $zone): bool
@@ -256,24 +411,7 @@ class AttendanceController extends Controller
         if (! $zone) {
             return false;
         }
-
-        $earthRadius = 6371000;
-        $latFrom = deg2rad($lat);
-        $lonFrom = deg2rad($lng);
-        $latTo = deg2rad($zone->latitude);
-        $lonTo = deg2rad($zone->longitude);
-
-        $latDelta = $latTo - $latFrom;
-        $lonDelta = $lonTo - $lonFrom;
-
-        $a = sin($latDelta / 2) * sin($latDelta / 2) +
-             cos($latFrom) * cos($latTo) *
-             sin($lonDelta / 2) * sin($lonDelta / 2);
-
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        $distance = $earthRadius * $c;
-
-        return $distance <= $zone->radius_m;
+        return $this->distanceTo($lat, $lng, $zone) <= $zone->radius_m;
     }
 
     private function calculateApproxDistance(float $lat, float $lng, ?WorkZone $zone): ?int
@@ -281,137 +419,31 @@ class AttendanceController extends Controller
         if (! $zone) {
             return null;
         }
-
-        $earthRadius = 6371000;
-        $latFrom = deg2rad($lat);
-        $lonFrom = deg2rad($lng);
-        $latTo = deg2rad($zone->latitude);
-        $lonTo = deg2rad($zone->longitude);
-
-        $latDelta = $latTo - $latFrom;
-        $lonDelta = $lonTo - $lonFrom;
-
-        $a = sin($latDelta / 2) * sin($latDelta / 2) +
-             cos($latFrom) * cos($latTo) *
-             sin($lonDelta / 2) * sin($lonDelta / 2);
-
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        $distance = $earthRadius * $c;
-
-        return (int) round($distance / 10) * 10;
+        return (int) round($this->distanceTo($lat, $lng, $zone) / 10) * 10;
     }
-
-    // private function determineFlag($user, Carbon $date, bool $inZone): ?TimeLogFlag
-    // {
-    //     $flags = [];
-
-    //     $isRestDay = RestDay::where('user_id', $user->id)
-    //         ->where('date', $date)
-    //         ->where('status', \App\Enums\RestDayStatus::Approved)
-    //         ->exists();
-
-    //     if ($isRestDay) {
-    //         $flags[] = TimeLogFlag::WorkedOnRestDay;
-    //     }
-
-    //     if (!$inZone) {
-    //         $flags[] = TimeLogFlag::OutsideAuthorizedSite;
-    //     }
-
-    //     $schedule = $this->getUserSchedule($user);
-    //     $now = now();
-    //     if ($schedule && !$this->isWithinSchedule($now, $schedule)) {
-    //         $flags[] = TimeLogFlag::OutsideSchedule;
-    //     }
-
-    //     return $flags ? $flags[0] : null;
-    // }
-
-    private function determineFlag($user, Carbon $date, bool $inZone): ?TimeLogFlag
-    {
-        $flags = [];
-
-        if ($this->isHoliday($date)) {
-            $flags[] = TimeLogFlag::WorkedOnHoliday;
-        }
-
-        if ($this->isOnApprovedLeave($user, now())) {
-            $flags[] = TimeLogFlag::WorkedDuringLeave;
-        }
-
-        $isRestDay = RestDay::where('user_id', $user->id)
-            ->where('date', $date)
-            ->where('status', RestDayStatus::Approved)
-            ->exists();
-
-        if ($isRestDay) {
-            $flags[] = TimeLogFlag::WorkedOnRestDay;
-        }
-
-        if (! $inZone) {
-            $flags[] = TimeLogFlag::OutsideAuthorizedSite;
-        }
-
-        $schedule = $this->getUserSchedule($user);
-        if ($schedule && ! $this->isWithinSchedule(now(), $schedule)) {
-            $flags[] = TimeLogFlag::OutsideSchedule;
-        }
-
-        return $flags ? $flags[0] : null;
-    }
-
-    // private function getUserSchedule($user): ?Schedule
-    // {
-    //     $serviceSchedule = $user->service?->schedules()->first();
-    //     if ($serviceSchedule) {
-    //         return $serviceSchedule;
-    //     }
-
-    //     return $user->schedule;
-    // }
 
     private function getUserSchedule($user): ?Schedule
     {
-        return $user->schedule ?? $user->service?->schedules()->first();
+        return $user->schedule ?? $user->service?->schedules()->whereNull('user_id')->first();
     }
-
-    // private function isWithinSchedule(Carbon $time, Schedule $schedule): bool
-    // {
-    //     $days = json_decode($schedule->days, true);
-    //     $dayOfWeek = $time->dayOfWeek;
-
-    //     if (!in_array($dayOfWeek, $days)) {
-    //         return false;
-    //     }
-
-    //     $startTime = Carbon::parse($schedule->start_time);
-    //     $endTime = Carbon::parse($schedule->end_time);
-    //     $currentTime = $time->format('H:i');
-
-    //     return $currentTime >= $startTime->format('H:i') && $currentTime <= $endTime->format('H:i');
-    // }
 
     private function isWithinSchedule(Carbon $time, Schedule $schedule): bool
     {
-        $days = json_decode($schedule->days, true);
+        $days = is_array($schedule->days) ? $schedule->days : json_decode($schedule->days, true);
 
-        if (! in_array($time->dayOfWeek, $days)) {
+        // days are ISO weekday (1=Mon…7=Sun); PHP dayOfWeek: 0=Sun…6=Sat
+        $isoDay = $time->dayOfWeek === 0 ? 7 : $time->dayOfWeek;
+        if (! in_array($isoDay, $days, true)) {
             return false;
         }
 
-        $currentTime = $time->format('H:i');
-        $startTime = Carbon::parse($schedule->start_time)->format('H:i');
-        $endTime = Carbon::parse($schedule->end_time)->format('H:i');
-
-        if ($currentTime < $startTime || $currentTime > $endTime) {
+        $cur = $time->format('H:i');
+        if ($cur < substr($schedule->start_time, 0, 5) || $cur > substr($schedule->end_time, 0, 5)) {
             return false;
         }
 
         if ($schedule->break_start && $schedule->break_end) {
-            $breakStart = Carbon::parse($schedule->break_start)->format('H:i');
-            $breakEnd = Carbon::parse($schedule->break_end)->format('H:i');
-
-            if ($currentTime >= $breakStart && $currentTime <= $breakEnd) {
+            if ($cur >= substr($schedule->break_start, 0, 5) && $cur <= substr($schedule->break_end, 0, 5)) {
                 return false;
             }
         }
@@ -419,6 +451,7 @@ class AttendanceController extends Controller
         return true;
     }
 
+    /** F3.9 — late = arrival more than LATE_TOLERANCE_MIN after schedule start */
     private function calculateLateMinutes($user, Carbon $arrivalTime): int
     {
         $schedule = $this->getUserSchedule($user);
@@ -426,11 +459,11 @@ class AttendanceController extends Controller
             return 0;
         }
 
-        $startTime = Carbon::parse($schedule->start_time);
-        $arrival = $arrivalTime->copy()->setTimeFromTimeString($startTime->format('H:i'));
+        $scheduleStart = $arrivalTime->copy()->setTimeFromTimeString($schedule->start_time);
+        $threshold     = $scheduleStart->addMinutes(self::LATE_TOLERANCE_MIN);
 
-        if ($arrivalTime->gt($arrival)) {
-            return $arrivalTime->diffInMinutes($arrival);
+        if ($arrivalTime->gt($threshold)) {
+            return $arrivalTime->diffInMinutes($scheduleStart->subMinutes(self::LATE_TOLERANCE_MIN));
         }
 
         return 0;
@@ -438,18 +471,11 @@ class AttendanceController extends Controller
 
     private function determineSessionStatus(AttendanceSession $session): AttendanceStatus
     {
-        if (! $session->arrival || ! $session->departure) {
-            return AttendanceStatus::Incomplete;
-        }
+        $logs   = $session->timeLogs()->pluck('type');
+        $hasArr = $logs->contains(TimeLogType::Arrival);
+        $hasDep = $logs->contains(TimeLogType::Departure);
 
-        $hasArrival = $session->timeLogs()->where('type', TimeLogType::Arrival)->exists();
-        $hasDeparture = $session->timeLogs()->where('type', TimeLogType::Departure)->exists();
-
-        if ($hasArrival && $hasDeparture) {
-            return AttendanceStatus::Complete;
-        }
-
-        return AttendanceStatus::Incomplete;
+        return ($hasArr && $hasDep) ? AttendanceStatus::Complete : AttendanceStatus::Incomplete;
     }
 
     private function isHoliday(Carbon $date): bool
@@ -464,5 +490,48 @@ class AttendanceController extends Controller
             ->where('start', '<=', $time)
             ->where('end', '>=', $time)
             ->exists();
+    }
+
+    /** True if user has an approved external mission or remote work for now (F2.9 / F3.21) */
+    private function hasAuthorizedOffsite($user, Carbon $time): bool
+    {
+        return LeaveRequest::where('user_id', $user->id)
+            ->where('status', 'approved')
+            ->whereHas('type', function ($q) {
+                $q->whereIn('characteristic', ['external_mission', 'remote_work']);
+            })
+            ->where('start', '<=', $time)
+            ->where('end', '>=', $time)
+            ->exists();
+    }
+
+    private function determineFlag($user, Carbon $date, bool $inZone): ?TimeLogFlag
+    {
+        // Priority: holiday > leave > rest day > offsite > outside schedule
+        if ($this->isHoliday($date)) {
+            return TimeLogFlag::WorkedOnHoliday;
+        }
+
+        if ($this->isOnApprovedLeave($user, now())) {
+            return TimeLogFlag::WorkedDuringLeave;
+        }
+
+        if (RestDay::where('user_id', $user->id)
+            ->where('date', $date->toDateString())
+            ->where('status', RestDayStatus::Approved)
+            ->exists()) {
+            return TimeLogFlag::WorkedOnRestDay;
+        }
+
+        if (! $inZone) {
+            return TimeLogFlag::OutsideAuthorizedSite;
+        }
+
+        $schedule = $this->getUserSchedule($user);
+        if ($schedule && ! $this->isWithinSchedule(now(), $schedule)) {
+            return TimeLogFlag::OutsideSchedule;
+        }
+
+        return null;
     }
 }

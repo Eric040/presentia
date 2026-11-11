@@ -1,5 +1,14 @@
 import { Link, usePage } from '@inertiajs/react';
-import { ClipboardList, LayoutGrid, Plus } from 'lucide-react';
+import {
+    AlertTriangle,
+    Bell,
+    CalendarOff,
+    ClipboardList,
+    Clock,
+    LayoutGrid,
+    Plus,
+    Users,
+} from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
@@ -16,14 +25,33 @@ import {
 import { dashboard } from '@/routes';
 import type { NavItem } from '@/types';
 
-const mainNavItems: NavItem[] = [
-    { title: 'Tableau de bord', href: dashboard(), icon: LayoutGrid },
-    { title: 'Demandes', href: '/leave-requests', icon: ClipboardList },
-];
-
 export function AppSidebar() {
     const { auth } = usePage<{ auth: { user: { role?: string } | null } }>().props;
-    const canRequest = auth.user?.role !== 'administrator';
+    const role = auth.user?.role;
+    const isAdmin = role === 'administrator';
+    const isHr    = role === 'hr';
+    const isEmployee = role === 'employee';
+
+    const mainNavItems: NavItem[] = [
+        { title: 'Tableau de bord', href: dashboard(),         icon: LayoutGrid },
+        { title: 'Demandes',        href: '/leave-requests',   icon: ClipboardList },
+        { title: 'Jours de repos',  href: '/rest-days',        icon: CalendarOff },
+        { title: 'Pointage',        href: '/attendance',       icon: Clock },
+        { title: 'Pings',           href: '/pings',            icon: Bell },
+    ];
+
+    // Anomalies : visible pour manager, admin, hr mais PAS pour l'employé standard
+    // (l'employé peut justifier ses anomalies via la page pointage ou depuis une notification)
+    if (! isEmployee) {
+        mainNavItems.push({ title: 'Anomalies', href: '/anomalies', icon: AlertTriangle });
+    }
+
+    if (isAdmin) {
+        mainNavItems.push({ title: 'Utilisateurs', href: '/users', icon: Users });
+    }
+
+    // Non-admin users can submit a leave request
+    const canRequest = ! isAdmin;
 
     return (
         <Sidebar collapsible="icon" variant="inset">

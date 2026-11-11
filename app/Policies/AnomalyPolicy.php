@@ -24,15 +24,9 @@ class AnomalyPolicy
 
     public function viewAny(User $user): bool
     {
-        if ($user->hasRole(Role::Administrator, Role::Hr)) {
-            return true;
-        }
-
-        if ($user->hasRole(Role::Manager)) {
-            return true;
-        }
-
-        return false;
+        // Tous les rôles peuvent accéder à la liste — le contrôleur filtre par périmètre.
+        // Les employés ne voient que leurs propres anomalies (filtre dans le contrôleur).
+        return true;
     }
 
     public function create(User $user): bool

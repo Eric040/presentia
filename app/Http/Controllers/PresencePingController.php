@@ -45,15 +45,36 @@ class PresencePingController extends Controller
         $pings = $query->orderBy('sent_at', 'desc')->get();
 
         $stats = [
-            'total' => $pings->count(),
-            'pending' => $pings->whereNull('responded_at')->count(),
-            'responded' => $pings->whereNotNull('responded_at')->count(),
+            'total'         => $pings->count(),
+            'pending'       => $pings->whereNull('responded_at')->where('deliverability', PingDeliverability::Sent)->count(),
+            'responded'     => $pings->whereNotNull('responded_at')->count(),
             'undeliverable' => $pings->where('deliverability', PingDeliverability::Undeliverable)->count(),
         ];
 
+        // Serialize to a shape the frontend understands
+        $serialized = $pings->map(fn ($p) => [
+            'id'            => $p->id,
+            'user'          => ['id' => $p->user->id, 'name' => $p->user->name],
+            'sent_at'       => $p->sent_at->toIso8601String(),
+            'expires_at'    => $p->expires_at->toIso8601String(),
+            'responded_at'  => $p->responded_at?->toIso8601String(),
+            'result'        => $p->result?->value,
+            'deliverability' => $p->deliverability->value,
+            // Computed frontend status
+            'status'        => match (true) {
+                $p->deliverability === PingDeliverability::Undeliverable => 'undeliverable',
+                $p->responded_at !== null                                 => 'responded',
+                default                                                   => 'pending',
+            },
+            'can_respond'   => $p->user_id === $user->id
+                && $p->responded_at === null
+                && $p->expires_at->gt(now()),
+        ]);
+
         return Inertia::render('pings/index', [
-            'pings' => $pings,
-            'stats' => $stats,
+            'pings'  => $serialized,
+            'stats'  => $stats,
+            'isAdmin' => $user->hasRole(Role::Administrator, Role::Hr),
         ]);
     }
 
@@ -69,35 +90,34 @@ class PresencePingController extends Controller
         $this->authorize('update', $ping);
 
         if ($ping->user_id !== Auth::id()) {
-            return response()->json(['message' => 'Vous ne pouvez répondre qu\'à vos propres pings'], 403);
+            return back()->withErrors(['ping' => 'Vous ne pouvez répondre qu\'à vos propres pings.']);
         }
 
         if ($ping->responded_at || $ping->expires_at->lt(now())) {
-            return response()->json(['message' => 'Ce ping a déjà expiré ou a déjà reçu une réponse'], 400);
+            return back()->withErrors(['ping' => 'Ce ping a déjà expiré ou a déjà reçu une réponse.']);
         }
 
         $validated = $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'accuracy' => 'required|numeric|min:0',
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
         ]);
 
-        $user = Auth::user();
+        $user     = Auth::user();
         $workZone = $this->getUserWorkZone($user);
-        $inZone = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        $inZone   = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        $result   = $inZone ? PingResult::InZone : PingResult::OutOfZone;
 
-        $result = $inZone ? PingResult::InZone : PingResult::OutOfZone;
-
-        $ping->update([
+        $ping->forceFill([
             'responded_at' => now(),
-            'result' => $result,
-        ]);
+            'result'       => $result,
+        ])->save();
 
         if ($result === PingResult::OutOfZone) {
-            $this->createAnomaly($ping, 'ping', 'Hors zone lors du ping de présence');
+            $this->createAnomaly($ping, 'ping_out_of_zone', 'Hors zone lors du ping de présence');
         }
 
-        return response()->json($ping);
+        return back();
     }
 
     public function sendPing(Request $request)
@@ -145,13 +165,13 @@ class PresencePingController extends Controller
         $this->authorize('update', $ping);
 
         if (! $ping->user->hasActivePushSubscription()) {
-            $ping->update(['deliverability' => PingDeliverability::Undeliverable]);
-            $this->createAnomaly($ping, 'ping', 'Ping non délivrable (abonnement push inactif)');
+            $ping->forceFill(['deliverability' => PingDeliverability::Undeliverable])->save();
+            $this->createAnomaly($ping, 'ping_undeliverable', 'Ping non délivrable (abonnement push inactif)');
 
-            return response()->json($ping);
+            return back();
         }
 
-        return response()->json(['message' => 'L\'utilisateur a un abonnement push actif'], 400);
+        return back()->withErrors(['ping' => 'L\'utilisateur a un abonnement push actif.']);
     }
 
     private function getUserWorkZone($user): ?WorkZone
