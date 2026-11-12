@@ -287,7 +287,7 @@ export default function Index({ restDays, stats, quotaInfo, filters, canCreate }
                                         <TableHead>Employé</TableHead>
                                         <TableHead>Date</TableHead>
                                         <TableHead>Statut</TableHead>
-                                        <TableHead>Décidé par</TableHead>
+                                        <TableHead className="hidden md:table-cell">Décidé par</TableHead>
                                         <TableHead />
                                     </TableRow>
                                 </TableHeader>
@@ -322,7 +322,7 @@ export default function Index({ restDays, stats, quotaInfo, filters, canCreate }
                                                     </p>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground">
+                                            <TableCell className="hidden md:table-cell text-muted-foreground">
                                                 {item.decider?.name ?? '—'}
                                             </TableCell>
                                             <TableCell>

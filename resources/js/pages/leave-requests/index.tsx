@@ -324,10 +324,10 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Demandeur</TableHead>
-                                        <TableHead>Type</TableHead>
-                                        <TableHead>Période</TableHead>
+                                        <TableHead className="hidden sm:table-cell">Type</TableHead>
+                                        <TableHead className="hidden md:table-cell">Période</TableHead>
                                         <TableHead>Statut</TableHead>
-                                        <TableHead>Validateur</TableHead>
+                                        <TableHead className="hidden lg:table-cell">Validateur</TableHead>
                                         <TableHead />
                                     </TableRow>
                                 </TableHeader>
@@ -342,15 +342,15 @@ export default function Index({ leaveRequests, types, stats, filters, canCreate,
                                     {leaveRequests.map((item) => (
                                         <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setViewing(item)}>
                                             <TableCell className="font-medium">{item.user.name}</TableCell>
-                                            <TableCell>{item.type.label}</TableCell>
-                                            <TableCell className="whitespace-nowrap">
+                                            <TableCell className="hidden sm:table-cell">{item.type.label}</TableCell>
+                                            <TableCell className="hidden md:table-cell whitespace-nowrap">
                                                 {formatDate(item.start)} → {formatDate(item.end)}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge variant={statuses[item.status].variant}>{statuses[item.status].label}</Badge>
                                                 {item.comment && <p className="mt-1 text-xs text-muted-foreground">{item.comment}</p>}
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground">{item.approver?.name ?? '—'}</TableCell>
+                                            <TableCell className="hidden lg:table-cell text-muted-foreground">{item.approver?.name ?? '—'}</TableCell>
                                             <TableCell>
                                                 <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                                     {item.status === 'pending' && item.can.approve && (

@@ -25,11 +25,11 @@ export function DatePicker({ value, onChange, placeholder = "Choisir une date", 
         <Button
           variant="outline"
           className={cn(
-            "w-[240px] justify-start text-left font-normal",
+            "w-full justify-start text-left font-normal",
             !value && "text-muted-foreground"
           )}
         >
-          <CalendarIcon className="mr-2 size-4" />
+          <CalendarIcon className="mr-2 size-4 shrink-0" />
           {value ? format(value, "dd/MM/yyyy") : <span>{placeholder}</span>}
         </Button>
       </PopoverTrigger>

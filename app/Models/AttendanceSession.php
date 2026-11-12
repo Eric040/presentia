@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 // Créée et mise à jour par la logique de pointage uniquement, jamais depuis une saisie directe.
-#[Fillable(['date', 'arrival', 'departure', 'status', 'late_minutes'])]
+#[Fillable(['date', 'arrival', 'departure', 'status', 'late_minutes', 'justification'])]
 class AttendanceSession extends Model
 {
     protected function casts(): array

@@ -234,11 +234,11 @@ export default function Index({ users, services, roles, filters, canCreate }: Pr
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Nom</TableHead>
-                                        <TableHead>Email</TableHead>
+                                        <TableHead className="hidden md:table-cell">Email</TableHead>
                                         <TableHead>Rôle</TableHead>
-                                        <TableHead>Service</TableHead>
-                                        <TableHead>Quota repos</TableHead>
-                                        <TableHead>Statut</TableHead>
+                                        <TableHead className="hidden lg:table-cell">Service</TableHead>
+                                        <TableHead className="hidden lg:table-cell">Quota repos</TableHead>
+                                        <TableHead className="hidden sm:table-cell">Statut</TableHead>
                                         <TableHead />
                                     </TableRow>
                                 </TableHeader>
@@ -266,7 +266,7 @@ export default function Index({ users, services, roles, filters, canCreate }: Pr
                                                     </span>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground">
+                                            <TableCell className="hidden md:table-cell text-muted-foreground">
                                                 {u.email}
                                             </TableCell>
                                             <TableCell>
@@ -274,19 +274,17 @@ export default function Index({ users, services, roles, filters, canCreate }: Pr
                                                     {u.role_label}
                                                 </Badge>
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground">
+                                            <TableCell className="hidden lg:table-cell text-muted-foreground">
                                                 {u.service?.name ?? '—'}
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="hidden lg:table-cell">
                                                 <span className="tabular-nums">
                                                     {u.rest_quota} j/mois
                                                 </span>
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="hidden sm:table-cell">
                                                 <Badge
-                                                    variant={
-                                                        u.active ? 'default' : 'outline'
-                                                    }
+                                                    variant={u.active ? 'default' : 'outline'}
                                                 >
                                                     {u.active ? 'Actif' : 'Désactivé'}
                                                 </Badge>

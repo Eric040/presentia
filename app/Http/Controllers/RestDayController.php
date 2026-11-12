@@ -122,6 +122,11 @@ class RestDayController extends Controller
             return back()->withErrors(['date' => 'Ce jour est un jour férié.']);
         }
 
+        // F7.3 / F7.19 — uniquement le mois en cours, pas de report sur le mois suivant
+        if ($date->month !== $now->month || $date->year !== $now->year) {
+            return back()->withErrors(['date' => 'Vous ne pouvez proposer des jours de repos que pour le mois en cours.']);
+        }
+
         // Must not already be proposed/approved this month quota
         $approvedCount = RestDay::where('user_id', $user->id)
             ->where('status', RestDayStatus::Approved)

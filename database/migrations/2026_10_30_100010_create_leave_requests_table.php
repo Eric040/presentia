@@ -14,7 +14,7 @@ return new class extends Migration
             $table->foreignId('type_id')->constrained('leave_types');
             $table->dateTime('start');
             $table->dateTime('end');
-            $table->text('reason')->nullable();
+            $table->text('reason');
             // pending, approved, rejected, cancelled, expired
             $table->string('status', 20)->default('pending');
             $table->text('comment')->nullable();

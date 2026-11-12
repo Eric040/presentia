@@ -22,6 +22,8 @@ class AnomalyController extends Controller
         'ping'               => 'Ping',
         'session_incomplete' => 'Session incomplète',
         'absence'            => 'Absence',
+        'out_of_zone'        => 'Hors zone (pointage)',
+        'late_arrival'       => 'Retard',
     ];
 
     public function index(Request $request): Response

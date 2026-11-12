@@ -183,10 +183,10 @@ export default function Index({ anomalies, stats, filters }: Props) {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Employé</TableHead>
-                                        <TableHead>Type</TableHead>
-                                        <TableHead>Date</TableHead>
+                                        <TableHead className="hidden sm:table-cell">Type</TableHead>
+                                        <TableHead className="hidden md:table-cell">Date</TableHead>
                                         <TableHead>Statut</TableHead>
-                                        <TableHead>Justification</TableHead>
+                                        <TableHead className="hidden lg:table-cell">Justification</TableHead>
                                         <TableHead />
                                     </TableRow>
                                 </TableHeader>
@@ -210,19 +210,19 @@ export default function Index({ anomalies, stats, filters }: Props) {
                                             <TableCell className="font-medium">
                                                 {a.user?.name ?? '—'}
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="hidden sm:table-cell">
                                                 <div className="flex items-center gap-1.5">
                                                     <AlertTriangle className="size-3.5 text-muted-foreground" />
                                                     {a.type_label}
                                                 </div>
                                             </TableCell>
-                                            <TableCell>{fmtDate(a.date)}</TableCell>
+                                            <TableCell className="hidden md:table-cell">{fmtDate(a.date)}</TableCell>
                                             <TableCell>
                                                 <Badge variant={statusConfig[a.status].variant}>
                                                     {statusConfig[a.status].label}
                                                 </Badge>
                                             </TableCell>
-                                            <TableCell className="max-w-xs">
+                                            <TableCell className="hidden lg:table-cell max-w-xs">
                                                 {a.justification ? (
                                                     <p className="truncate text-sm text-muted-foreground">
                                                         {a.justification}

@@ -43,15 +43,15 @@ export default function Profile({
 
     return (
         <>
-            <Head title="Profile settings" />
+            <Head title="Paramètres du profil" />
 
-            <h1 className="sr-only">Profile settings</h1>
+            <h1 className="sr-only">Paramètres du profil</h1>
 
             <div className="space-y-6">
                 <Heading
                     variant="small"
-                    title="Profile"
-                    description="Update your name, email address, and profile photo"
+                    title="Profil"
+                    description="Mettez à jour votre nom, adresse e-mail et photo de profil"
                 />
 
                 <Form
@@ -68,14 +68,12 @@ export default function Profile({
                                     {getPhotoUrl() ? (
                                         <img
                                             src={getPhotoUrl()}
-                                            alt="Profile photo"
+                                            alt="Photo de profil"
                                             className="h-full w-full object-cover"
                                         />
                                     ) : (
                                         <div className="flex h-full w-full items-center justify-center text-2xl font-bold text-neutral-400">
-                                            {auth.user.name
-                                                .charAt(0)
-                                                .toUpperCase()}
+                                            {auth.user.name.charAt(0).toUpperCase()}
                                         </div>
                                     )}
                                 </div>
@@ -84,7 +82,7 @@ export default function Profile({
                                         htmlFor="profile_photo"
                                         className="cursor-pointer text-sm font-medium text-foreground hover:underline"
                                     >
-                                        Choose a new photo
+                                        Choisir une nouvelle photo
                                     </Label>
                                     <Input
                                         id="profile_photo"
@@ -95,7 +93,7 @@ export default function Profile({
                                         onChange={handlePhotoChange}
                                     />
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        JPEG, PNG, or WebP. Max 2MB.
+                                        JPEG, PNG ou WebP. 2 Mo maximum.
                                     </p>
                                     {errors.profile_photo && (
                                         <InputError
@@ -107,8 +105,7 @@ export default function Profile({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label htmlFor="name">Name</Label>
-
+                                <Label htmlFor="name">Nom complet</Label>
                                 <Input
                                     id="name"
                                     className="mt-1 block w-full"
@@ -116,18 +113,13 @@ export default function Profile({
                                     name="name"
                                     required
                                     autoComplete="name"
-                                    placeholder="Full name"
+                                    placeholder="Nom complet"
                                 />
-
-                                <InputError
-                                    className="mt-2"
-                                    message={errors.name}
-                                />
+                                <InputError className="mt-2" message={errors.name} />
                             </div>
 
                             <div className="grid gap-2">
-                                <Label htmlFor="email">Email address</Label>
-
+                                <Label htmlFor="email">Adresse e-mail</Label>
                                 <Input
                                     id="email"
                                     type="email"
@@ -136,46 +128,35 @@ export default function Profile({
                                     name="email"
                                     required
                                     autoComplete="username"
-                                    placeholder="Email address"
+                                    placeholder="Adresse e-mail"
                                 />
-
-                                <InputError
-                                    className="mt-2"
-                                    message={errors.email}
-                                />
+                                <InputError className="mt-2" message={errors.email} />
                             </div>
 
-                            {mustVerifyEmail &&
-                                auth.user.email_verified_at === null && (
-                                    <div>
-                                        <p className="-mt-4 text-sm text-muted-foreground">
-                                            Your email address is unverified.{' '}
-                                            <Link
-                                                href={send()}
-                                                as="button"
-                                                className="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
-                                            >
-                                                Click here to re-send the
-                                                verification email.
-                                            </Link>
-                                        </p>
+                            {mustVerifyEmail && auth.user.email_verified_at === null && (
+                                <div>
+                                    <p className="-mt-4 text-sm text-muted-foreground">
+                                        Votre adresse e-mail n'est pas vérifiée.{' '}
+                                        <Link
+                                            href={send()}
+                                            as="button"
+                                            className="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
+                                        >
+                                            Cliquez ici pour renvoyer l'e-mail de vérification.
+                                        </Link>
+                                    </p>
 
-                                        {status ===
-                                            'verification-link-sent' && (
-                                            <div className="mt-2 text-sm font-medium text-green-600">
-                                                A new verification link has been
-                                                sent to your email address.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                    {status === 'verification-link-sent' && (
+                                        <div className="mt-2 text-sm font-medium text-green-600">
+                                            Un nouveau lien de vérification a été envoyé à votre adresse e-mail.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             <div className="flex items-center gap-4">
-                                <Button
-                                    disabled={processing}
-                                    data-test="update-profile-button"
-                                >
-                                    Save
+                                <Button disabled={processing} data-test="update-profile-button">
+                                    Enregistrer
                                 </Button>
                             </div>
                         </>
@@ -191,7 +172,7 @@ export default function Profile({
 Profile.layout = {
     breadcrumbs: [
         {
-            title: 'Profile settings',
+            title: 'Paramètres du profil',
             href: edit(),
         },
     ],

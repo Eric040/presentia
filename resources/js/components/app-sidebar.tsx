@@ -30,7 +30,6 @@ export function AppSidebar() {
     const role = auth.user?.role;
     const isAdmin = role === 'administrator';
     const isHr    = role === 'hr';
-    const isEmployee = role === 'employee';
 
     const mainNavItems: NavItem[] = [
         { title: 'Tableau de bord', href: dashboard(),         icon: LayoutGrid },
@@ -38,13 +37,8 @@ export function AppSidebar() {
         { title: 'Jours de repos',  href: '/rest-days',        icon: CalendarOff },
         { title: 'Pointage',        href: '/attendance',       icon: Clock },
         { title: 'Pings',           href: '/pings',            icon: Bell },
+        { title: 'Anomalies',       href: '/anomalies',        icon: AlertTriangle },
     ];
-
-    // Anomalies : visible pour manager, admin, hr mais PAS pour l'employé standard
-    // (l'employé peut justifier ses anomalies via la page pointage ou depuis une notification)
-    if (! isEmployee) {
-        mainNavItems.push({ title: 'Anomalies', href: '/anomalies', icon: AlertTriangle });
-    }
 
     if (isAdmin) {
         mainNavItems.push({ title: 'Utilisateurs', href: '/users', icon: Users });

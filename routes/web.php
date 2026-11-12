@@ -56,6 +56,7 @@ Route::middleware(['auth', 'verified', 'push'])->group(function () {
         Route::post('clock-out', 'clockOut')->name('clock-out');
         Route::post('break/start', 'startBreak')->name('break.start');
         Route::post('break/end', 'endBreak')->name('break.end');
+        Route::patch('{attendanceSession}/justify', 'justify')->name('justify')->whereNumber('attendanceSession');
     });
 
     Route::controller(PresencePingController::class)->prefix('pings')->name('pings.')->group(function () {

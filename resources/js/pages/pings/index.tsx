@@ -290,10 +290,10 @@ export default function Index({ pings, stats, isAdmin }: Props) {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Employé</TableHead>
-                                        <TableHead>Envoyé</TableHead>
-                                        <TableHead>Expire</TableHead>
-                                        <TableHead>Répondu</TableHead>
-                                        <TableHead>Résultat</TableHead>
+                                        <TableHead className="hidden sm:table-cell">Envoyé</TableHead>
+                                        <TableHead className="hidden lg:table-cell">Expire</TableHead>
+                                        <TableHead className="hidden md:table-cell">Répondu</TableHead>
+                                        <TableHead className="hidden md:table-cell">Résultat</TableHead>
                                         <TableHead>Statut</TableHead>
                                         <TableHead />
                                     </TableRow>
@@ -309,14 +309,14 @@ export default function Index({ pings, stats, isAdmin }: Props) {
                                     {filtered.map((p) => (
                                         <TableRow key={p.id}>
                                             <TableCell className="font-medium">{p.user.name}</TableCell>
-                                            <TableCell className="whitespace-nowrap">{fmtDT(p.sent_at)}</TableCell>
-                                            <TableCell className="whitespace-nowrap text-muted-foreground">
+                                            <TableCell className="hidden sm:table-cell whitespace-nowrap">{fmtDT(p.sent_at)}</TableCell>
+                                            <TableCell className="hidden lg:table-cell whitespace-nowrap text-muted-foreground">
                                                 {fmtDT(p.expires_at)}
                                             </TableCell>
-                                            <TableCell className="whitespace-nowrap">
+                                            <TableCell className="hidden md:table-cell whitespace-nowrap">
                                                 {fmtDT(p.responded_at)}
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="hidden md:table-cell">
                                                 {p.result ? (
                                                     <span className={
                                                         p.result === 'in_zone'
