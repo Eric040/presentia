@@ -36,6 +36,11 @@ class AnomalyPolicy
 
     public function update(User $user, Anomaly $anomaly): bool
     {
+        // L'employé peut justifier sa propre anomalie
+        if ($anomaly->user_id === $user->id) {
+            return true;
+        }
+
         if ($user->hasRole(Role::Administrator, Role::Hr)) {
             return true;
         }

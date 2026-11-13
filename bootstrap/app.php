@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\ForcePasswordChange;
 use App\Http\Middleware\HandleAppearance;
+use App\Http\Middleware\HandleInertiaErrors;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RequireOtp;
 use App\Http\Middleware\RequirePushSubscription;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,
+            HandleInertiaErrors::class,
             AddLinkHeadersForPreloadedAssets::class,
             ForcePasswordChange::class,
             RequireOtp::class,

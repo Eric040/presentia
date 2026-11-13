@@ -100,7 +100,7 @@ class OtpController extends Controller
 
         try {
             Mail::raw(
-                "Votre code de connexion Presentia : {$code}\nIl expire à {$expiresAt->format('H')}h {$expiresAt->format('i')}min.",
+                "Votre code de connexion Presentia : {$code}\nIl expire dans 10 minutes à {$expiresAt->format('H')}h {$expiresAt->format('i')}min.",
                 fn ($mail) => $mail->to($user->email)->subject('Code de connexion Presentia')
             );
         } catch (\Throwable $e) {

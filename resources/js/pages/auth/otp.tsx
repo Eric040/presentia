@@ -86,7 +86,7 @@ export default function Otp({ email, cooldown, expiresAt }: Props) {
 
             <div className="space-y-2 text-center text-sm text-muted-foreground">
                 <p>
-                    Code envoyé à {email}. Il expire à {formatTime(expiresAt)}.
+                    Code envoyé à {email}. Il expire dans 10 minutes à {formatTime(expiresAt)}.
                 </p>
 
                 <button

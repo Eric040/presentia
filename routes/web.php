@@ -54,8 +54,9 @@ Route::middleware(['auth', 'verified', 'push'])->group(function () {
         Route::get('{attendanceSession}', 'show')->name('show')->whereNumber('attendanceSession');
         Route::post('clock-in', 'clockIn')->name('clock-in');
         Route::post('clock-out', 'clockOut')->name('clock-out');
-        Route::post('break/start', 'startBreak')->name('break.start');
-        Route::post('break/end', 'endBreak')->name('break.end');
+        // Route::post('break/start', 'startBreak')->name('break.start');
+        // Route::post('break/end', 'endBreak')->name('break.end');
+        Route::post('clock-resume', 'clockResume')->name('clock-resume');
         Route::patch('{attendanceSession}/justify', 'justify')->name('justify')->whereNumber('attendanceSession');
     });
 
@@ -79,6 +80,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('push/required', 'push/required')->name('push.required');
     Route::post('push-subscriptions', [PushSubscriptionController::class, 'store'])->name('push-subscriptions.store');
     Route::delete('push-subscriptions/{pushSubscription}', [PushSubscriptionController::class, 'destroy'])->name('push-subscriptions.destroy');
+
+    // Notifications
+    Route::get('notifications', [\App\Http\Controllers\NotificationController::class, 'page'])->name('notifications.index');
+    Route::get('api/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('api.notifications.index');
+    Route::patch('notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('notifications.read');
+    Route::patch('notifications/mark-all-read', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead'])->name('notifications.mark-all-read');
+    Route::delete('notifications/{notification}', [\App\Http\Controllers\NotificationController::class, 'destroy'])->name('notifications.destroy');
 });
 
 require __DIR__.'/settings.php';

@@ -6,6 +6,7 @@ use App\Enums\AnomalyStatus;
 use App\Enums\Role;
 use App\Models\ActivityLog;
 use App\Models\Anomaly;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -138,6 +139,14 @@ class AnomalyController extends Controller
             $anomaly,
             ['status' => AnomalyStatus::ToProcess->value],
             ['status' => $data['decision']],
+        );
+
+        // Notifier l'employé que son anomalie a été traitée
+        app(NotificationService::class)->notifyAnomalyProcessed(
+            $anomaly->user,
+            $data['decision'],
+            $anomaly->type,
+            $anomaly->date->format('d/m/Y')
         );
 
         return back();

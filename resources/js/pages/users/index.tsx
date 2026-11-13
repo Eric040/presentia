@@ -36,6 +36,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { Pagination, type PaginationData } from '@/components/pagination';
 
 // =========================
 // TYPES
@@ -57,7 +58,7 @@ type UserRow = {
 };
 
 type Props = {
-    users: UserRow[];
+    users: PaginationData & { data: UserRow[] };
     services: ServiceOption[];
     roles: RoleOption[];
     filters: { role?: string; service_id?: string; active?: string };

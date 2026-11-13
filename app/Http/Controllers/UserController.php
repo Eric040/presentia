@@ -33,7 +33,8 @@ class UserController extends Controller
             $query->where('active', $request->boolean('active'));
         }
 
-        $users = $query->get()->map(fn (User $u) => [
+        $perPage = $request->input('per_page', 20);
+        $users = $query->paginate($perPage)->through(fn (User $u) => [
             'id' => $u->id,
             'name' => $u->name,
             'email' => $u->email,

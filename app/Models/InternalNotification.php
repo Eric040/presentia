@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['type', 'channel', 'minimal_content', 'data'])]
+#[Fillable(['recipient_id', 'type', 'channel', 'minimal_content', 'data', 'send_status'])]
 class InternalNotification extends Model
 {
     protected function casts(): array

@@ -38,6 +38,7 @@ class AttendanceController extends Controller
 
     public function index(Request $request)
     {
+        /** @var \App\Models\User $user */
         $user = Auth::user();
         $query = AttendanceSession::with(['user', 'timeLogs']);
 
@@ -70,10 +71,10 @@ class AttendanceController extends Controller
         $stats = [
             'active'    => $sessions->where('status', AttendanceStatus::InProgress)->count(),
             'completed' => $sessions->where('status', AttendanceStatus::Complete)->count(),
-            'on_break'  => $sessions->filter(function ($s) {
-                $last = $s->timeLogs->sortBy('id')->last();
-                return $last && $last->type === TimeLogType::BreakStart;
-            })->count(),
+            // 'on_break'  => $sessions->filter(function ($s) {
+            //     $last = $s->timeLogs->sortBy('id')->last();
+            //     return $last && $last->type === TimeLogType::BreakStart;
+            // })->count(),
         ];
 
         // Session du jour pour l'employé courant (si non-admin)
@@ -85,48 +86,86 @@ class AttendanceController extends Controller
                 ->first();
 
             if ($raw) {
-                $lastLog = $raw->timeLogs->sortBy('id')->last();
-                $onBreak    = $lastLog && $lastLog->type === TimeLogType::BreakStart;
-                $hasArrived = ! is_null($raw->arrival);
+                $schedule    = $this->getUserSchedule($user);
+                $hasArrived  = ! is_null($raw->arrival);
                 $hasDeparted = ! is_null($raw->departure);
+                $hasResumed  = $raw->timeLogs->contains(fn ($l) => $l->type === TimeLogType::Resume);
+                $isAbsent    = $raw->status === AttendanceStatus::Absence;
+                $breakEnd    = $schedule?->break_end ? substr($schedule->break_end, 0, 5) : null;
+                $endTime     = $schedule ? substr($schedule->end_time, 0, 5) : null;
+                $nowTime     = now()->format('H:i');
 
-                // Determine next available action label
                 $nextAction = match (true) {
-                    $hasDeparted            => 'done',       // session complete
-                    $onBreak                => 'break_end',  // end break
-                    $hasArrived && ! $onBreak => 'break_start_or_clock_out', // can break or clock out
-                    default                 => 'clock_in',   // nothing done yet today
+                    $isAbsent                                           => 'blocked',
+                    $hasDeparted                                        => 'done',
+                    ! $hasArrived                                       => 'clock_in',
+                    ! $endTime || $nowTime >= $endTime                  => 'clock_out',
+                    $breakEnd && ! $hasResumed && $nowTime >= $breakEnd => 'resume',
+                    $breakEnd && ! $hasResumed                          => 'wait_resume',
+                    default                                             => 'wait_clock_out',
                 };
 
-                // Déterminer si l'utilisateur est considéré absent (retard > 2h)
-                $isAbsent = $raw->late_minutes > (self::ABSENCE_THRESHOLD_HOURS * 60);
-
-                // Déterminer si l'utilisateur peut justifier (retard > 0 ou absent)
-                $canJustify = $raw->late_minutes > 0;
-
                 $todaySession = [
-                    'id'           => $raw->id,
-                    'arrival'      => $raw->arrival?->toIso8601String(),
-                    'departure'    => $raw->departure?->toIso8601String(),
-                    'status'       => $raw->status->value,
-                    'late_minutes' => $raw->late_minutes,
-                    'justification'=> $raw->justification,
-                    'on_break'     => $onBreak,
-                    'has_arrived'  => $hasArrived,
-                    'has_departed' => $hasDeparted,
-                    'next_action'  => $nextAction,
-                    'is_absent'    => $isAbsent,
-                    'can_justify'  => $canJustify,
+                    'id'            => $raw->id,
+                    'arrival'       => $raw->arrival?->toIso8601String(),
+                    'departure'     => $raw->departure?->toIso8601String(),
+                    'status'        => $raw->status->value,
+                    'late_minutes'  => $raw->late_minutes,
+                    'justification' => $raw->justification,
+                    'has_arrived'   => $hasArrived,
+                    'has_departed'  => $hasDeparted,
+                    'has_resumed'   => $hasResumed,
+                    'resume_time'   => $breakEnd,
+                    'end_time'      => $endTime,
+                    'next_action'   => $nextAction,
+                    'is_absent'     => $isAbsent,
+                    'can_justify'   => $raw->late_minutes > 0,
                 ];
             }
+
+            // if ($raw) {
+            //     $lastLog = $raw->timeLogs->sortBy('id')->last();
+            //     $onBreak    = $lastLog && $lastLog->type === TimeLogType::BreakStart;
+            //     $hasArrived = ! is_null($raw->arrival);
+            //     $hasDeparted = ! is_null($raw->departure);
+
+            //     // Determine next available action label
+            //     $nextAction = match (true) {
+            //         $hasDeparted            => 'done',       // session complete
+            //         $onBreak                => 'break_end',  // end break
+            //         $hasArrived && ! $onBreak => 'break_start_or_clock_out', // can break or clock out
+            //         default                 => 'clock_in',   // nothing done yet today
+            //     };
+
+            //     // Déterminer si l'utilisateur est considéré absent (retard > 2h)
+            //     $isAbsent = $raw->late_minutes > (self::ABSENCE_THRESHOLD_HOURS * 60);
+
+            //     // Déterminer si l'utilisateur peut justifier (retard > 0 ou absent)
+            //     $canJustify = $raw->late_minutes > 0;
+
+            //     $todaySession = [
+            //         'id'           => $raw->id,
+            //         'arrival'      => $raw->arrival?->toIso8601String(),
+            //         'departure'    => $raw->departure?->toIso8601String(),
+            //         'status'       => $raw->status->value,
+            //         'late_minutes' => $raw->late_minutes,
+            //         'justification'=> $raw->justification,
+            //         'on_break'     => $onBreak,
+            //         'has_arrived'  => $hasArrived,
+            //         'has_departed' => $hasDeparted,
+            //         'next_action'  => $nextAction,
+            //         'is_absent'    => $isAbsent,
+            //         'can_justify'  => $canJustify,
+            //     ];
+            // }
         }
 
         // Serialise les sessions pour le frontend
         $serialized = $sessions->map(function ($s) {
             $lastLog = $s->timeLogs->sortBy('id')->last();
             $derivedStatus = match (true) {
-                ! is_null($s->departure) => $s->status->value, // complete or incomplete
-                $lastLog && $lastLog->type === TimeLogType::BreakStart => 'on_break',
+                ! is_null($s->departure) => $s->status->value,
+                $s->status === AttendanceStatus::Absence => $s->status->value,
                 ! is_null($s->arrival)   => 'in_progress',
                 default                  => $s->status->value,
             };
@@ -214,7 +253,7 @@ class AttendanceController extends Controller
         if ($session) {
             if ($session->arrival && ! $session->departure) {
                 return redirect()->route('attendance.index')
-                    ->withErrors(['clock' => 'Vous avez déjà pointé votre arrivée aujourd\'hui.']);
+                    ->withErrors(['clock' => 'Vous avez déjà pointé votre arrivée aujourd\'hui. Attendez 18h30 pour pointer le départ.']);
             }
 
             if ($session->departure) {
@@ -286,7 +325,22 @@ class AttendanceController extends Controller
                 'status'       => AttendanceStatus::Absence,
             ]);
             
-            $this->createAnomaly($session, 'absence', 'Absence (retard supérieur à 2h)');
+            $anomaly = $this->createAnomaly($session, 'absence', 'Absence (retard supérieur à 2h)');
+            
+            // Notifier l'employé et les admins
+            app(\App\Services\NotificationService::class)->sendAnomalyCreated(
+                $user, 
+                'absence', 
+                $today->format('d/m/Y'), 
+                $anomaly->id
+            );
+            app(\App\Services\NotificationService::class)->notifyAdminsOfAnomaly(
+                $user->id,
+                $user->name,
+                'absence',
+                $today->format('d/m/Y'),
+                $anomaly->id
+            );
             
             return redirect()->route('attendance.index')
                 ->withErrors(['clock' => 'Absence enregistrée (retard de ' . $this->formatLateMinutes($lateMinutes) . '). Vous ne pouvez plus pointer aujourd\'hui. Veuillez justifier votre absence.']);
@@ -303,12 +357,31 @@ class AttendanceController extends Controller
 
         // 1. Anomalie "Hors zone" si force_anomaly est true
         if ($forceAnomaly || (!$inZone && !$this->hasAuthorizedOffsite($user, now()))) {
-            $this->createAnomaly($session, 'out_of_zone', 'Pointage hors zone (précision GPS insuffisante)');
+            $anomaly = $this->createAnomaly($session, 'out_of_zone', 'Pointage hors zone (précision GPS insuffisante)');
+            app(\App\Services\NotificationService::class)->sendAnomalyCreated(
+                $user, 
+                'out_of_zone', 
+                $today->format('d/m/Y'), 
+                $anomaly->id
+            );
         }
 
         // 2. Anomalie "Retard" si retard > tolérance mais < seuil absence
         if ($lateMinutes > self::LATE_TOLERANCE_MIN) {
-            $this->createAnomaly($session, 'late_arrival', 'Retard de ' . $lateMinutes . ' minutes');
+            $anomaly = $this->createAnomaly($session, 'late_arrival', 'Retard de ' . $lateMinutes . ' minutes');
+            app(\App\Services\NotificationService::class)->sendAnomalyCreated(
+                $user, 
+                'late_arrival', 
+                $today->format('d/m/Y'), 
+                $anomaly->id
+            );
+            app(\App\Services\NotificationService::class)->notifyAdminsOfAnomaly(
+                $user->id,
+                $user->name,
+                'late_arrival',
+                $today->format('d/m/Y'),
+                $anomaly->id
+            );
         }
 
         return redirect()->route('attendance.index');
@@ -320,6 +393,11 @@ class AttendanceController extends Controller
         $today    = Carbon::today();
         $session  = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
         $schedule = $this->getUserSchedule($user);
+
+        if ($session?->status === AttendanceStatus::Absence) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Absence enregistrée. Vous ne pouvez plus pointer aujourd\'hui. Veuillez justifier votre absence.']);
+        }
 
         if (! $session || ! $session->arrival) {
             return redirect()->route('attendance.index')
@@ -385,136 +463,19 @@ class AttendanceController extends Controller
             'status'    => $this->determineSessionStatus($session),
         ]);
 
-        return redirect()->route('attendance.index');
-    }
-
-    public function startBreak(Request $request)
-    {
-        $user     = Auth::user();
-        $today    = Carbon::today();
-        $session  = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
-        $schedule = $this->getUserSchedule($user);
-
-        if (! $session || ! $session->arrival) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Aucune session en cours.']);
+        if ($schedule?->break_end && ! $session->timeLogs()->where('type', TimeLogType::Resume->value)->exists()) {
+            $anomaly = $this->createAnomaly($session, 'missing_resume', 'Reprise non pointée');
+            app(\App\Services\NotificationService::class)->sendAnomalyCreated(
+                $user, 
+                'missing_resume', 
+                $today->format('d/m/Y'), 
+                $anomaly->id
+            );
         }
-
-        // Bloquer si absence déclarée
-        if ($session->status === AttendanceStatus::Absence) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Absence enregistrée. Vous ne pouvez plus pointer aujourd\'hui.']);
-        }
-
-        $lastLog = $session->timeLogs()->latest('timestamp')->first();
-        if ($lastLog && $lastLog->type === TimeLogType::BreakStart) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Pause déjà en cours.']);
-        }
-
-        // RÈGLE : Pause uniquement pendant les heures de travail (hors pause déjeuner)
-        if ($schedule) {
-            $currentTime = now()->format('H:i');
-            $startTime   = substr($schedule->start_time, 0, 5);
-            $endTime     = substr($schedule->end_time, 0, 5);
-            $breakStart  = $schedule->break_start ? substr($schedule->break_start, 0, 5) : null;
-            $breakEnd    = $schedule->break_end ? substr($schedule->break_end, 0, 5) : null;
-
-            // Vérifier si l'heure actuelle est dans les plages de travail
-            $inWorkingHours = false;
-
-            // Avant la pause déjeuner (ex: 9h-13h)
-            if ($breakStart && $currentTime >= $startTime && $currentTime < $breakStart) {
-                $inWorkingHours = true;
-            }
-            // Après la pause déjeuner (ex: 14h30-18h30)
-            elseif ($breakEnd && $currentTime >= $breakEnd && $currentTime < $endTime) {
-                $inWorkingHours = true;
-            }
-            // Pas de pause déjeuner définie : toute la journée
-            elseif (!$breakStart && !$breakEnd && $currentTime >= $startTime && $currentTime < $endTime) {
-                $inWorkingHours = true;
-            }
-
-            if (!$inWorkingHours) {
-                $message = 'Vous ne pouvez prendre de pause qu\'aux heures de travail';
-                if ($breakStart && $breakEnd) {
-                    $message .= " ({$startTime}-{$breakStart} et {$breakEnd}-{$endTime})";
-                }
-                $message .= '.';
-                
-                return redirect()->route('attendance.index')
-                    ->withErrors(['clock' => $message]);
-            }
-        }
-
-        $validated = $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'accuracy'  => 'required|numeric|min:0',
-        ]);
-
-        $workZone       = $this->getUserWorkZone($user);
-        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
-        $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
-        $approxAccuracy = min((int) round($validated['accuracy']), self::GPS_ACCURACY_STORE_CAP);
-
-        $session->timeLogs()->create([
-            'type'            => TimeLogType::BreakStart,
-            'timestamp'       => now(),
-            'in_zone'         => $inZone,
-            'approx_distance' => $approxDistance,
-            'approx_accuracy' => $approxAccuracy,
-        ]);
 
         return redirect()->route('attendance.index');
-    }
-
-    public function endBreak(Request $request)
-    {
-        $user    = Auth::user();
-        $today   = Carbon::today();
-        $session = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
-
-        if (! $session || ! $session->arrival) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Aucune session en cours.']);
-        }
-
-        // Bloquer si absence déclarée
-        if ($session->status === AttendanceStatus::Absence) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Absence enregistrée. Vous ne pouvez plus pointer aujourd\'hui.']);
-        }
-
-        $lastLog = $session->timeLogs()->latest('timestamp')->first();
-        if (! $lastLog || $lastLog->type !== TimeLogType::BreakStart) {
-            return redirect()->route('attendance.index')
-                ->withErrors(['clock' => 'Aucune pause en cours.']);
-        }
-
-        $validated = $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'accuracy'  => 'required|numeric|min:0',
-        ]);
-
-        $workZone       = $this->getUserWorkZone($user);
-        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
-        $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
-        $approxAccuracy = min((int) round($validated['accuracy']), self::GPS_ACCURACY_STORE_CAP);
-
-        $session->timeLogs()->create([
-            'type'            => TimeLogType::BreakEnd,
-            'timestamp'       => now(),
-            'in_zone'         => $inZone,
-            'approx_distance' => $approxDistance,
-            'approx_accuracy' => $approxAccuracy,
-        ]);
-
-        return redirect()->route('attendance.index');
-    }
-
+    }   
+    
     public function justify(Request $request, AttendanceSession $attendanceSession)
     {
         $this->authorize('update', $attendanceSession);
@@ -528,6 +489,82 @@ class AttendanceController extends Controller
         ]);
 
         return redirect()->back();
+    }
+
+    /**
+     * Pointage de reprise après pause déjeuner (14h30)
+     * Sera déclenché par notification ou manuellement
+     */
+    public function clockResume(Request $request)
+    {
+        $user     = Auth::user();
+        $today    = Carbon::today();
+        $session  = AttendanceSession::where('user_id', $user->id)->whereDate('date', $today)->first();
+        $schedule = $this->getUserSchedule($user);
+
+        if ($session?->status === AttendanceStatus::Absence) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Absence enregistrée. Vous ne pouvez plus pointer aujourd\'hui.']);
+        }
+
+        if (! $session || ! $session->arrival) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune session en cours pour aujourd\'hui.']);
+        }
+
+        if ($session->departure) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Vous avez déjà pointé votre départ.']);
+        }
+
+        if ($session->timeLogs()->where('type', TimeLogType::Resume->value)->exists()) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Reprise déjà pointée.']);
+        }
+
+        if (! $schedule?->break_end) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Aucune reprise à pointer pour votre horaire.']);
+        }
+
+        if (now()->lt(Carbon::today()->setTimeFromTimeString($schedule->break_end))) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'La reprise se pointe à partir de ' . substr($schedule->break_end, 0, 5) . '.']);
+        }
+
+        $validated = $request->validate([
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy'  => 'required|numeric|min:0',
+        ]);
+
+        if ($validated['accuracy'] > self::GPS_ACCURACY_MAX_M) {
+            return redirect()->route('attendance.index')
+                ->withErrors(['clock' => 'Position trop imprécise (' . (int) $validated['accuracy'] . ' m). Réessayez ou régularisez.']);
+        }
+
+        $workZone       = $this->getUserWorkZone($user);
+        $inZone         = $this->isInZone($validated['latitude'], $validated['longitude'], $workZone);
+        $approxDistance = $this->calculateApproxDistance($validated['latitude'], $validated['longitude'], $workZone);
+        $approxAccuracy = min((int) round($validated['accuracy']), self::GPS_ACCURACY_STORE_CAP);
+
+        if (! $inZone && ! $this->hasAuthorizedOffsite($user, now())) {
+            return redirect()->route('attendance.index')->withErrors([
+                'clock' => 'Vous êtes hors de la zone de travail ('
+                    . ($approxDistance !== null ? $approxDistance . ' m du site' : 'zone inconnue')
+                    . '). Reprise refusée. Vous pouvez régulariser.',
+            ]);
+        }
+
+        $session->timeLogs()->create([
+            'type'            => TimeLogType::Resume,
+            'timestamp'       => now(),
+            'in_zone'         => $inZone,
+            'approx_distance' => $approxDistance,
+            'approx_accuracy' => $approxAccuracy,
+        ]);
+
+        return redirect()->route('attendance.index');
     }
 
     // ─────────────────────────────────────────────────────────
@@ -694,14 +731,24 @@ class AttendanceController extends Controller
             return; // Ne pas créer de doublon
         }
 
-        Anomaly::create([
-            'user_id'        => $session->user_id,
+        // Anomaly::create([
+        //     'user_id'        => $session->user_id,
+        //     'type'           => $type,
+        //     'date'           => $session->date,
+        //     'reference_type' => 'session',
+        //     'reference_id'   => $session->id,
+        //     'status'         => AnomalyStatus::ToProcess,
+        // ]);
+
+        $anomaly = new Anomaly([
             'type'           => $type,
             'date'           => $session->date,
             'reference_type' => 'session',
             'reference_id'   => $session->id,
-            'status'         => AnomalyStatus::ToProcess,
         ]);
+        $anomaly->user_id = $session->user_id;
+        $anomaly->status  = AnomalyStatus::ToProcess;
+        $anomaly->save();
     }
 
     /**

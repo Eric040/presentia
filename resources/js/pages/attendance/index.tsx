@@ -12,7 +12,7 @@ import {
     MapPin,
     RefreshCw,
 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -88,7 +88,7 @@ type TodaySession = {
     on_break: boolean;
     has_arrived: boolean;
     has_departed: boolean;
-    next_action: 'clock_in' | 'break_start_or_clock_out' | 'break_end' | 'done';
+    next_action: 'clock_in' | 'wait_resume' | 'resume' | 'wait_clock_out' | 'clock_out' | 'done' | 'blocked';
     is_absent: boolean;
     can_justify: boolean;
 };
@@ -265,6 +265,13 @@ function ClockWidget({
     const isAbsent    = today?.is_absent    ?? false;
     const canJustify  = today?.can_justify  ?? false;
     const isBusy      = pendingAction !== null || geo.status === 'requesting';
+    const next        = today?.next_action;
+
+    useEffect(() => {
+        if (next !== 'wait_resume' && next !== 'wait_clock_out') return;
+        const id = setInterval(() => router.reload({ only: ['todaySession'] }), 30000);
+        return () => clearInterval(id);
+    }, [today]);
 
     if (!canClockIn) return null;
 
@@ -341,6 +348,7 @@ function ClockWidget({
             </Button>
         );
     };
+    
 
     return (
         <>
@@ -394,6 +402,18 @@ function ClockWidget({
                         {hasArrived && onBreak && getActionButton('/attendance/break/end', 'break-end', CoffeeIcon, 'Fin de pause')}
                         {hasArrived && getActionButton('/attendance/clock-out', 'clock-out', LogOut, 'Pointer le départ')}
                     </div>
+                )}
+
+                {next === 'wait_resume' && !pendingAction && (
+                    <p className="text-sm text-muted-foreground">
+                        Reprise disponible à partir de {today?.resume_time}.
+                    </p>
+                )}
+
+                {next === 'wait_clock_out' && !pendingAction && (
+                    <p className="text-sm text-muted-foreground">
+                        Départ disponible à partir de {today?.end_time}.
+                    </p>
                 )}
 
                 {/* Actions après lecture GPS */}
